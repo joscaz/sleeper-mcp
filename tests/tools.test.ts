@@ -365,6 +365,32 @@ describe("projections & stats", () => {
   });
 });
 
+describe("default user", () => {
+  it("without a default, user-less calls explain what to pass", async () => {
+    const leagues = await c.call("get_user_leagues");
+    expect(leagues.result.isError).toBe(true);
+    expect(leagues.text).toMatch(/SLEEPER_USERNAME/);
+    const roster = await c.call("get_roster", { league_id: LEAGUE_ID });
+    expect(roster.result.isError).toBe(true);
+    expect(roster.text).toMatch(/roster_id, username, user_id or team_name/);
+  });
+
+  it("with a default, 'my' questions resolve without a selector and explicit selectors still win", async () => {
+    const mine = await connectedClient({}, { defaultUser: "alice" });
+    try {
+      expect((await mine.call("get_user")).data).toMatchObject({ user_id: "111", username: "alice" });
+      expect((await mine.call("get_user_leagues")).data).toMatchObject({ user_id: "111", count: 1 });
+      expect((await mine.call("get_roster", { league_id: LEAGUE_ID })).data).toMatchObject({ manager: "Alice" });
+      expect((await mine.call("get_lineup_projections", { league_id: LEAGUE_ID })).data).toMatchObject({ manager: "Alice" });
+      expect((await mine.call("get_roster", { league_id: LEAGUE_ID, username: "bob" })).data).toMatchObject({ manager: "Bobby Tables" });
+      const info = mine.client.getInstructions();
+      expect(info).toContain('Default user: "alice"');
+    } finally {
+      await mine.close();
+    }
+  });
+});
+
 describe("error handling", () => {
   it("rejects invalid input with a validation error rather than crashing", async () => {
     const { result, text } = await c.call("get_matchups", { league_id: LEAGUE_ID, week: 99 });

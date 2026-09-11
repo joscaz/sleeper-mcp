@@ -46,11 +46,11 @@ export function testClient(ff: FakeFetch = fakeFetch()): SleeperClient {
 }
 
 /** Full server + MCP client wired over an in-memory transport. */
-export async function connectedClient(overrides: Record<string, unknown> = {}) {
+export async function connectedClient(overrides: Record<string, unknown> = {}, options: { defaultUser?: string } = {}) {
   const ff = fakeFetch(overrides);
   const sleeper = testClient(ff);
   const players = new PlayerStore(sleeper, { cacheDir: null });
-  const { server, ctx } = createServer({ client: sleeper, players, log: () => {}, preloadPlayers: false });
+  const { server, ctx } = createServer({ client: sleeper, players, log: () => {}, preloadPlayers: false, ...options });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   const client = new Client({ name: "test-client", version: "0.0.0" });
