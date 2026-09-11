@@ -1,0 +1,55 @@
+name: Bug report
+description: Something returned the wrong data, errored, or crashed
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you ask or call, and what came back?
+      placeholder: 'Asked "who should I start" and get_lineup_projections returned an error...'
+    validations:
+      required: true
+  - type: textarea
+    id: call
+    attributes:
+      label: Tool call
+      description: The tool name and arguments, if you know them. League IDs and usernames are public on Sleeper, so it is fine to include them.
+      render: json
+      placeholder: '{ "name": "get_roster", "arguments": { "league_id": "1234567890", "username": "someone" } }'
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `sleeper-mcp --version` (or `node dist/index.js --version`).
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: MCP client
+      options:
+        - Claude Desktop
+        - Claude Code
+        - Cursor
+        - Windsurf
+        - MCP Inspector
+        - Other (say which below)
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options:
+        - stdio
+        - HTTP (--http)
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Anything the server printed to stderr (lines starting with `[sleeper-mcp]`).
+      render: shell

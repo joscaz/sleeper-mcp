@@ -1,5 +1,10 @@
 # sleeper-mcp
 
+[![CI](https://github.com/joscaz/sleeper-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/joscaz/sleeper-mcp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/%40joscaz%2Fsleeper-mcp)](https://www.npmjs.com/package/@joscaz/sleeper-mcp)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Sleeper](https://sleeper.com) fantasy football, built so an AI assistant can actually answer fantasy questions instead of handing you a wall of player IDs.
 
 Ask Claude, Cursor, or any MCP client things like:
@@ -228,15 +233,18 @@ const state = await sleeper.getNflState();
 const leagues = await sleeper.getUserLeagues("<user_id>", "nfl", state.league_season);
 ```
 
-## Publishing
+## Contributing
+
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev setup, the project layout and how to add a tool; the short version is `npm ci && npm test`. Security reports go through [SECURITY.md](SECURITY.md), and everyone is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Releasing
 
 ```bash
-npm version minor
-npm publish --access public
-git push --follow-tags
+npm version minor        # bumps package.json and tags vX.Y.Z
+git push --follow-tags   # the Release workflow publishes to npm and creates the GitHub release
 ```
 
-`prepublishOnly` runs the build and the test suite.
+See the "Releasing" section of CONTRIBUTING.md for the one-time npm setup.
 
 ## Credits & license
 

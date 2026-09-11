@@ -1,0 +1,22 @@
+name: Feature request
+description: A question the assistant cannot answer yet, or a tool that should exist
+labels: [enhancement]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: What are you trying to ask?
+      description: The fantasy question in plain words is the best starting point.
+      placeholder: '"Which of my bench players has the easiest schedule over the next 3 weeks?"'
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed tool or change
+      description: Sketch the tool name, inputs and output if you have one in mind. Note that the server is read-only; Sleeper has no public API for lineup, waiver or trade changes.
+  - type: textarea
+    id: data
+    attributes:
+      label: Where would the data come from?
+      description: A Sleeper endpoint (see https://docs.sleeper.com) or a combination of existing tools.
