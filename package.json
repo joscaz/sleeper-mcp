@@ -1,0 +1,72 @@
+{
+  "name": "@joscaz/sleeper-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for Sleeper fantasy football: resolved player names everywhere, standings, matchups, free agents, drafts, league-scored projections. stdio + Streamable HTTP.",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "sleeper",
+    "sleeper-api",
+    "fantasy-football",
+    "nfl",
+    "claude",
+    "cursor"
+  ],
+  "license": "MIT",
+  "author": "Jose Zertuche",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joscaz/sleeper-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/joscaz/sleeper-mcp/issues"
+  },
+  "homepage": "https://github.com/joscaz/sleeper-mcp#readme",
+  "type": "module",
+  "bin": {
+    "sleeper-mcp": "dist/index.js"
+  },
+  "main": "dist/server.js",
+  "types": "dist/server.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./client": {
+      "types": "./dist/sleeper/client.d.ts",
+      "import": "./dist/sleeper/client.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/index.ts",
+    "dev:http": "tsx src/index.ts --http --port 3000",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke": "tsx scripts/smoke.ts",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

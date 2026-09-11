@@ -1,0 +1,148 @@
+import { createServer as createHttpServer, type IncomingMessage, type ServerResponse, type Server as NodeHttpServer } from "node:http";
+import { randomUUID } from "node:crypto";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createServer, SERVER_NAME, SERVER_VERSION, type CreateServerOptions } from "./server.js";
+import type { ServerContext } from "./context.js";
+
+export interface HttpServerOptions extends CreateServerOptions {
+  host?: string;
+  port?: number;
+  /** Optional bearer token required on /mcp. Read from SLEEPER_MCP_AUTH_TOKEN by default. */
+  authToken?: string | null;
+  /** Value for Access-Control-Allow-Origin (default "*"). */
+  corsOrigin?: string;
+  /** Path the MCP endpoint is served on (default "/mcp"). */
+  path?: string;
+}
+
+export interface RunningHttpServer {
+  httpServer: NodeHttpServer;
+  ctx: ServerContext;
+  url: string;
+  close: () => Promise<void>;
+}
+
+/**
+ * Serve the MCP server over Streamable HTTP.
+ *
+ * The server is stateless: every request gets a fresh transport (no session ids), which makes it
+ * trivially safe to run behind a load balancer or on serverless hosts. Caches live in `ctx` and are
+ * shared across requests.
+ */
+export async function startHttpServer(options: HttpServerOptions = {}): Promise<RunningHttpServer> {
+  const host = options.host ?? process.env.HOST ?? "0.0.0.0";
+  const port = options.port ?? Number(process.env.PORT ?? 3000);
+  const authToken = options.authToken === undefined ? (process.env.SLEEPER_MCP_AUTH_TOKEN ?? null) : options.authToken;
+  const corsOrigin = options.corsOrigin ?? "*";
+  const mcpPath = options.path ?? "/mcp";
+  const { server, ctx } = createServer(options);
+
+  const httpServer = createHttpServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    setCors(res, corsOrigin);
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204).end();
+      return;
+    }
+
+    if (url.pathname === "/healthz" || url.pathname === "/health") {
+      json(res, 200, {
+        ok: true,
+        name: SERVER_NAME,
+        version: SERVER_VERSION,
+        players_loaded: ctx.players.isLoaded,
+        players: ctx.players.count,
+        requests_sent: ctx.client.requestsSent,
+      });
+      return;
+    }
+
+    if (url.pathname === "/" && req.method === "GET") {
+      json(res, 200, {
+        name: SERVER_NAME,
+        version: SERVER_VERSION,
+        transport: "streamable-http",
+        endpoint: mcpPath,
+        docs: "https://github.com/joscaz/sleeper-mcp",
+      });
+      return;
+    }
+
+    if (url.pathname !== mcpPath) {
+      json(res, 404, { error: "not_found", hint: `MCP endpoint is ${mcpPath}` });
+      return;
+    }
+
+    if (authToken && !authorized(req, authToken)) {
+      res.setHeader("WWW-Authenticate", 'Bearer realm="sleeper-mcp"');
+      json(res, 401, { error: "unauthorized" });
+      return;
+    }
+
+    if (req.method !== "POST") {
+      // Stateless mode: no server-initiated streams (GET) and nothing to DELETE.
+      json(res, 405, { error: "method_not_allowed", hint: "Use POST with a JSON-RPC body (stateless Streamable HTTP)." });
+      return;
+    }
+
+    try {
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+      res.on("close", () => {
+        transport.close().catch(() => {});
+      });
+      await server.connect(transport);
+      await transport.handleRequest(req, res);
+    } catch (err) {
+      ctx.log(`request failed: ${(err as Error).message}`);
+      if (!res.headersSent) json(res, 500, { jsonrpc: "2.0", error: { code: -32603, message: "Internal server error" }, id: null });
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once("error", reject);
+    httpServer.listen(port, host, () => {
+      httpServer.off("error", reject);
+      resolve();
+    });
+  });
+
+  const address = httpServer.address();
+  const actualPort = typeof address === "object" && address ? address.port : port;
+  const displayHost = host === "0.0.0.0" || host === "::" ? "localhost" : host;
+  const publicUrl = `http://${displayHost}:${actualPort}${mcpPath}`;
+  ctx.log(`listening on ${publicUrl}${authToken ? " (bearer auth enabled)" : ""}`);
+
+  return {
+    httpServer,
+    ctx,
+    url: publicUrl,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        httpServer.close((err) => (err ? reject(err) : resolve()));
+        httpServer.closeAllConnections?.();
+      }),
+  };
+}
+
+function authorized(req: IncomingMessage, token: string): boolean {
+  const header = req.headers.authorization;
+  if (!header) return false;
+  const [scheme, value] = header.split(" ");
+  return scheme?.toLowerCase() === "bearer" && value === token;
+}
+
+function setCors(res: ServerResponse, origin: string): void {
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID");
+  res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+  res.setHeader("Access-Control-Max-Age", "86400");
+}
+
+function json(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
+export { randomUUID };

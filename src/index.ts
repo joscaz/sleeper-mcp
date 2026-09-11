@@ -1,0 +1,128 @@
+#!/usr/bin/env node
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { createServer, SERVER_VERSION } from "./server.js";
+import { startHttpServer } from "./http.js";
+
+const HELP = `sleeper-mcp ${SERVER_VERSION} — MCP server for Sleeper fantasy football
+
+Usage:
+  sleeper-mcp                 Run over stdio (for Claude Desktop, Cursor, Claude Code, ...)
+  sleeper-mcp --http          Run as a Streamable HTTP server (remote / hosted use)
+
+Options:
+  --http                      Use Streamable HTTP transport instead of stdio
+  --port <n>                  HTTP port (default: $PORT or 3000)
+  --host <addr>               HTTP bind address (default: $HOST or 0.0.0.0)
+  --no-preload                Do not download the player database at startup
+  -h, --help                  Show this help
+  -v, --version               Print version
+
+Environment:
+  SLEEPER_MCP_AUTH_TOKEN      If set, HTTP clients must send "Authorization: Bearer <token>"
+  SLEEPER_MCP_CACHE_DIR       Where to cache the player database (default: ~/.cache/sleeper-mcp)
+  PORT, HOST                  HTTP defaults
+`;
+
+interface CliArgs {
+  http: boolean;
+  port?: number;
+  host?: string;
+  preload: boolean;
+  help: boolean;
+  version: boolean;
+}
+
+export function parseArgs(argv: string[]): CliArgs {
+  const args: CliArgs = { http: false, preload: true, help: false, version: false };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    switch (arg) {
+      case "--http":
+        args.http = true;
+        break;
+      case "--stdio":
+        args.http = false;
+        break;
+      case "--port": {
+        const value = Number(argv[++i]);
+        if (!Number.isInteger(value) || value < 0 || value > 65535) throw new Error(`Invalid --port value: ${argv[i]}`);
+        args.port = value;
+        args.http = true;
+        break;
+      }
+      case "--host":
+        args.host = argv[++i];
+        args.http = true;
+        break;
+      case "--no-preload":
+        args.preload = false;
+        break;
+      case "-h":
+      case "--help":
+        args.help = true;
+        break;
+      case "-v":
+      case "--version":
+        args.version = true;
+        break;
+      default:
+        if (arg.startsWith("--port=")) {
+          args.port = Number(arg.slice("--port=".length));
+          args.http = true;
+        } else if (arg.startsWith("--host=")) {
+          args.host = arg.slice("--host=".length);
+          args.http = true;
+        } else {
+          throw new Error(`Unknown option: ${arg}\n\n${HELP}`);
+        }
+    }
+  }
+  return args;
+}
+
+async function main(): Promise<void> {
+  let args: CliArgs;
+  try {
+    args = parseArgs(process.argv.slice(2));
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(2);
+  }
+  if (args.help) {
+    process.stdout.write(HELP);
+    return;
+  }
+  if (args.version) {
+    process.stdout.write(`${SERVER_VERSION}\n`);
+    return;
+  }
+
+  const cacheDir = process.env.SLEEPER_MCP_CACHE_DIR === "" ? null : process.env.SLEEPER_MCP_CACHE_DIR;
+
+  if (args.http) {
+    const running = await startHttpServer({ host: args.host, port: args.port, preloadPlayers: args.preload, cacheDir });
+    const shutdown = () => {
+      running.close().finally(() => process.exit(0));
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+    return;
+  }
+
+  // stdio: never write anything but JSON-RPC to stdout.
+  const { server, ctx } = createServer({ preloadPlayers: args.preload, cacheDir });
+  process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+    // The client went away mid-write; exit quietly instead of dumping a stack trace.
+    if (err.code === "EPIPE") process.exit(0);
+    throw err;
+  });
+  const transport = new StdioServerTransport();
+  transport.onclose = () => process.exit(0);
+  await server.connect(transport);
+  ctx.log(`sleeper-mcp ${SERVER_VERSION} ready on stdio`);
+}
+
+main().catch((err) => {
+  console.error(`[sleeper-mcp] fatal: ${(err as Error).stack ?? err}`);
+  process.exit(1);
+});
