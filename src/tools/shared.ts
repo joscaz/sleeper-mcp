@@ -40,7 +40,9 @@ export const usernameSchema = z.string().trim().min(1).optional().describe("Slee
 export const userIdSchema = z.string().trim().min(1).optional().describe("Numeric Sleeper user_id (preferred over username when known).");
 
 export const teamSelectorShape = {
-  username: usernameSchema.describe("Username or display name of the manager whose team you want."),
+  username: usernameSchema.describe(
+    "Username or display name of the manager whose team you want. Omit every selector to use the server's default user, if one is configured.",
+  ),
   user_id: userIdSchema,
   roster_id: z.number().int().positive().optional().describe("Roster ID within the league (1..N)."),
   team_name: z.string().trim().min(1).optional().describe("Team name to match (case-insensitive, partial OK)."),

@@ -35,10 +35,10 @@ export interface CreateServerOptions extends ContextOptions {
 
 export function createServer(options: CreateServerOptions = {}): { server: McpServer; ctx: ServerContext } {
   const ctx = createContext(options);
-  const server = new McpServer(
-    { name: SERVER_NAME, version: SERVER_VERSION },
-    { instructions: SERVER_INSTRUCTIONS },
-  );
+  const instructions = ctx.defaultUser
+    ? `${SERVER_INSTRUCTIONS}\n- Default user: "${ctx.defaultUser}". For "my team" / "my leagues" questions, omit the user/team selector and this user is assumed.`
+    : SERVER_INSTRUCTIONS;
+  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions });
 
   registerLeagueTools(server, ctx);
   registerRosterTools(server, ctx);

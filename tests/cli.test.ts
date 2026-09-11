@@ -18,8 +18,14 @@ describe("CLI argument parsing", () => {
     expect(parseArgs(["--version"]).version).toBe(true);
   });
 
+  it("accepts a default user in both forms without implying http", () => {
+    expect(parseArgs(["--user", "joscaz"])).toMatchObject({ user: "joscaz", http: false });
+    expect(parseArgs(["--user=joscaz"]).user).toBe("joscaz");
+  });
+
   it("rejects bad input", () => {
     expect(() => parseArgs(["--port", "abc"])).toThrow(/Invalid --port/);
+    expect(() => parseArgs(["--user"])).toThrow(/Missing value for --user/);
     expect(() => parseArgs(["--wat"])).toThrow(/Unknown option/);
   });
 });

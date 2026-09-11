@@ -13,11 +13,13 @@ Options:
   --http                      Use Streamable HTTP transport instead of stdio
   --port <n>                  HTTP port (default: $PORT or 3000)
   --host <addr>               HTTP bind address (default: $HOST or 0.0.0.0)
+  --user <name>               Your Sleeper username: "my team" / "my leagues" resolve to it
   --no-preload                Do not download the player database at startup
   -h, --help                  Show this help
   -v, --version               Print version
 
 Environment:
+  SLEEPER_USERNAME            Same as --user
   SLEEPER_MCP_AUTH_TOKEN      If set, HTTP clients must send "Authorization: Bearer <token>"
   SLEEPER_MCP_CACHE_DIR       Where to cache the player database (default: ~/.cache/sleeper-mcp)
   PORT, HOST                  HTTP defaults
@@ -27,6 +29,7 @@ interface CliArgs {
   http: boolean;
   port?: number;
   host?: string;
+  user?: string;
   preload: boolean;
   help: boolean;
   version: boolean;
@@ -54,6 +57,12 @@ export function parseArgs(argv: string[]): CliArgs {
         args.host = argv[++i];
         args.http = true;
         break;
+      case "--user": {
+        const value = argv[++i]?.trim();
+        if (!value) throw new Error("Missing value for --user");
+        args.user = value;
+        break;
+      }
       case "--no-preload":
         args.preload = false;
         break;
@@ -72,6 +81,8 @@ export function parseArgs(argv: string[]): CliArgs {
         } else if (arg.startsWith("--host=")) {
           args.host = arg.slice("--host=".length);
           args.http = true;
+        } else if (arg.startsWith("--user=")) {
+          args.user = arg.slice("--user=".length).trim() || undefined;
         } else {
           throw new Error(`Unknown option: ${arg}\n\n${HELP}`);
         }
@@ -98,9 +109,10 @@ async function main(): Promise<void> {
   }
 
   const cacheDir = process.env.SLEEPER_MCP_CACHE_DIR === "" ? null : process.env.SLEEPER_MCP_CACHE_DIR;
+  const defaultUser = args.user ?? process.env.SLEEPER_USERNAME?.trim() ?? null;
 
   if (args.http) {
-    const running = await startHttpServer({ host: args.host, port: args.port, preloadPlayers: args.preload, cacheDir });
+    const running = await startHttpServer({ host: args.host, port: args.port, preloadPlayers: args.preload, cacheDir, defaultUser });
     const shutdown = () => {
       running.close().finally(() => process.exit(0));
     };
@@ -110,7 +122,7 @@ async function main(): Promise<void> {
   }
 
   // stdio: never write anything but JSON-RPC to stdout.
-  const { server, ctx } = createServer({ preloadPlayers: args.preload, cacheDir });
+  const { server, ctx } = createServer({ preloadPlayers: args.preload, cacheDir, defaultUser });
   process.stdout.on("error", (err: NodeJS.ErrnoException) => {
     // The client went away mid-write; exit quietly instead of dumping a stack trace.
     if (err.code === "EPIPE") process.exit(0);
@@ -119,7 +131,7 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   transport.onclose = () => process.exit(0);
   await server.connect(transport);
-  ctx.log(`sleeper-mcp ${SERVER_VERSION} ready on stdio`);
+  ctx.log(`sleeper-mcp ${SERVER_VERSION} ready on stdio${ctx.defaultUser ? ` (default user: ${ctx.defaultUser})` : ""}`);
 }
 
 main().catch((err) => {

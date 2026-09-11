@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { loadLeague, resolveSeason, resolveUserId, ToolError, type ServerContext } from "../context.js";
+import { loadLeague, NO_USER_HINT, resolveSeason, resolveUserId, ToolError, type ServerContext } from "../context.js";
 import { avatarUrl } from "../sleeper/client.js";
 import type { League, LeagueUser, Roster } from "../sleeper/types.js";
 import {
@@ -43,8 +43,8 @@ export function registerLeagueTools(server: McpServer, ctx: ServerContext): void
     },
     async ({ username, user_id }) =>
       guard(async () => {
-        const raw = (user_id ?? username ?? "").trim();
-        if (!raw) throw new ToolError("Provide username or user_id.");
+        const raw = (user_id ?? username ?? ctx.defaultUser ?? "").trim();
+        if (!raw) throw new ToolError(NO_USER_HINT);
         const user = await ctx.client.getUser(raw);
         return {
           user_id: user.user_id,

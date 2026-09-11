@@ -67,7 +67,8 @@ npx -y @joscaz/sleeper-mcp
   "mcpServers": {
     "sleeper": {
       "command": "node",
-      "args": ["/absolute/path/to/sleeper-mcp/dist/index.js"]
+      "args": ["/absolute/path/to/sleeper-mcp/dist/index.js"],
+      "env": { "SLEEPER_USERNAME": "your_sleeper_username" }
     }
   }
 }
@@ -78,12 +79,16 @@ npx -y @joscaz/sleeper-mcp
 ### Claude Code
 
 ```bash
-claude mcp add sleeper -- node /absolute/path/to/sleeper-mcp/dist/index.js
+claude mcp add sleeper -e SLEEPER_USERNAME=your_sleeper_username -- node /absolute/path/to/sleeper-mcp/dist/index.js
 ```
 
 ### Cursor / Windsurf / other stdio clients
 
-Same shape: command `node`, args `["/absolute/path/to/sleeper-mcp/dist/index.js"]`.
+Same shape: command `node`, args `["/absolute/path/to/sleeper-mcp/dist/index.js"]`, env `SLEEPER_USERNAME`.
+
+### Make it yours
+
+Sleeper's API is public and read-only, so there is no login step: every league, roster and matchup is readable by anyone who knows a username or league ID. The only thing the server cannot know by itself is *who you are*. Set `SLEEPER_USERNAME` (or pass `--user`) and every tool that takes a user or team falls back to you, so "what are my leagues?", "show my roster" and "who should I start?" work without naming yourself. Explicit selectors always win, so questions about other managers still work.
 
 ### Remote / hosted (Streamable HTTP)
 
@@ -102,7 +107,7 @@ docker run -p 3000:3000 -e SLEEPER_MCP_AUTH_TOKEN=change-me -v sleeper-cache:/da
 
 ## Tools
 
-Every tool that takes a team accepts any of `username` (or display name), `user_id`, `roster_id`, `team_name` (partial, case-insensitive). `week` defaults to the current NFL week and `season` to the current league season.
+Every tool that takes a team accepts any of `username` (or display name), `user_id`, `roster_id`, `team_name` (partial, case-insensitive), or nothing at all when `SLEEPER_USERNAME` is set. `week` defaults to the current NFL week and `season` to the current league season.
 
 ### Users & leagues
 
@@ -171,11 +176,12 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
+| `SLEEPER_USERNAME` | Your Sleeper username (or user_id). Tools that take a user/team default to it, so "my team" questions need no selector. | unset |
 | `SLEEPER_MCP_AUTH_TOKEN` | If set, HTTP clients must send `Authorization: Bearer <token>`. | unset (no auth) |
 | `SLEEPER_MCP_CACHE_DIR` | Where the player database is cached on disk. Set to an empty string to disable. | `~/.cache/sleeper-mcp` |
 | `PORT`, `HOST` | HTTP bind defaults (`--port`/`--host` override). | `3000`, `0.0.0.0` |
 
-CLI flags: `--http`, `--port <n>`, `--host <addr>`, `--no-preload`, `--help`, `--version`.
+CLI flags: `--http`, `--port <n>`, `--host <addr>`, `--user <name>`, `--no-preload`, `--help`, `--version`.
 
 ## How it works
 

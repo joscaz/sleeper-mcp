@@ -7,6 +7,8 @@ export interface ServerContext {
   client: SleeperClient;
   players: PlayerStore;
   log: (message: string) => void;
+  /** Username or user_id assumed when a tool is called without a user/team selector ("my team"). */
+  defaultUser: string | null;
 }
 
 export interface ContextOptions {
@@ -14,13 +16,16 @@ export interface ContextOptions {
   players?: PlayerStore;
   log?: (message: string) => void;
   cacheDir?: string | null;
+  /** Default Sleeper username or user_id (CLI --user / SLEEPER_USERNAME). */
+  defaultUser?: string | null;
 }
 
 export function createContext(options: ContextOptions = {}): ServerContext {
   const log = options.log ?? ((message: string) => console.error(`[sleeper-mcp] ${message}`));
   const client = options.client ?? new SleeperClient();
   const players = options.players ?? new PlayerStore(client, { cacheDir: options.cacheDir, log });
-  return { client, players, log };
+  const defaultUser = options.defaultUser?.trim() || null;
+  return { client, players, log, defaultUser };
 }
 
 /** Thrown for user-facing problems (bad input, unknown league, ...). The message is shown to the model verbatim. */
@@ -43,10 +48,12 @@ export interface TeamSelector extends UserSelector {
 
 const NUMERIC_ID = /^\d{6,}$/;
 
-/** Resolve a username or user_id to a canonical user_id. */
+export const NO_USER_HINT = "Provide a Sleeper username or user_id (or start the server with --user / SLEEPER_USERNAME so \"my\" questions resolve automatically).";
+
+/** Resolve a username or user_id to a canonical user_id, falling back to the configured default user. */
 export async function resolveUserId(ctx: ServerContext, sel: UserSelector): Promise<string> {
-  const raw = (sel.user_id ?? sel.username ?? "").trim();
-  if (!raw) throw new ToolError("Provide a Sleeper username or user_id.");
+  const raw = (sel.user_id ?? sel.username ?? ctx.defaultUser ?? "").trim();
+  if (!raw) throw new ToolError(NO_USER_HINT);
   if (NUMERIC_ID.test(raw)) return raw;
   try {
     const user = await ctx.client.getUser(raw);
@@ -95,9 +102,16 @@ export async function loadLeague(ctx: ServerContext, leagueId: string): Promise<
   }
 }
 
-/** Find one roster in a league by roster_id, user_id, username or (fuzzy) team name. */
+/**
+ * Find one roster in a league by roster_id, user_id, username or (fuzzy) team name.
+ * With no selector at all, the configured default user is used.
+ */
 export async function resolveRoster(ctx: ServerContext, bundle: LeagueBundle, sel: TeamSelector): Promise<Roster> {
   const { rosters, users, teams } = bundle;
+
+  if (sel.roster_id === undefined && !sel.user_id && !sel.username && !sel.team_name && ctx.defaultUser) {
+    sel = { username: ctx.defaultUser };
+  }
 
   if (sel.roster_id !== undefined) {
     const roster = rosters.find((r) => r.roster_id === sel.roster_id);
@@ -132,5 +146,5 @@ export async function resolveRoster(ctx: ServerContext, bundle: LeagueBundle, se
     return roster;
   }
 
-  throw new ToolError("Identify the team with one of: roster_id, username, user_id or team_name.");
+  throw new ToolError(`Identify the team with one of: roster_id, username, user_id or team_name. ${NO_USER_HINT}`);
 }
