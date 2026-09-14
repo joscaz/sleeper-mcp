@@ -2,6 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { ToolError } from "../context.js";
 import { SleeperApiError, SleeperNotFoundError } from "../sleeper/client.js";
+import { SleeperGraphqlError } from "../sleeper/graphql.js";
 
 /** Serialize a tool result as JSON text (plus structuredContent for clients that use it). */
 export function jsonResult(data: unknown): CallToolResult {
@@ -21,6 +22,18 @@ export async function guard(fn: () => Promise<unknown>): Promise<CallToolResult>
   } catch (err) {
     if (err instanceof ToolError) return errorResult(err.message);
     if (err instanceof SleeperNotFoundError) return errorResult(err.message);
+    if (err instanceof SleeperGraphqlError) {
+      if (err.unauthorized) {
+        return errorResult(
+          `Sleeper rejected the session (${err.message}). The token may have expired: capture a fresh one from the Sleeper web app (DevTools → Network → graphql → request header "authorization") and restart with SLEEPER_TOKEN.`,
+        );
+      }
+      if (err.status === 429) return errorResult("Sleeper is rate limiting requests right now. Wait a few seconds and try again.");
+      const hint = /roster is either invalid/i.test(err.message)
+        ? " Sleeper checks roster room when a claim or add is submitted, not when it processes: name a drop, or free a spot (IR) first."
+        : "";
+      return errorResult(`Sleeper refused the change: ${err.message}${hint}`);
+    }
     if (err instanceof SleeperApiError) {
       if (err.status === 429) return errorResult("Sleeper is rate limiting requests right now. Wait a few seconds and try again.");
       return errorResult(`Sleeper API request failed: ${err.message}`);

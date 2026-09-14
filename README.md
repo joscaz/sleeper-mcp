@@ -13,8 +13,9 @@ Ask Claude, Cursor, or any MCP client things like:
 - "Show me the standings and who's on the waiver wire at RB."
 - "Was the Bijan-for-Chase trade fair? Who won it?"
 - "Who did I draft in round 1 the last three years?"
+- "Move Jacobs to IR, start Corum, and put a claim in for Kaelon Black." *(with a Sleeper session, see [Account tools](#account-tools-optional-session))*
 
-No login, no API key: Sleeper's API is public and read-only.
+No login, no API key for reads: Sleeper's public API covers everything above the "Account" line. Add your Sleeper session and the same server can also set lineups, manage IR/taxi, submit waiver claims and propose trades.
 
 ## Why another Sleeper MCP?
 
@@ -166,6 +167,30 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 | `get_player_stats` | Actual weekly/season fantasy production with the same filters and scoring options. |
 | `get_lineup_projections` | Start/sit for one team: current vs optimal lineup (respecting FLEX/SUPER_FLEX/IDP eligibility), suggested swaps, bye/injury/empty-slot warnings. |
 
+### Account tools (optional, session)
+
+Registered only when a Sleeper session is configured (`SLEEPER_TOKEN`, or `SLEEPER_EMAIL` + `SLEEPER_PASSWORD`). They talk to Sleeper's **private GraphQL API** (`https://sleeper.com/graphql`), the same one the web app uses. Every tool that changes the account takes `dry_run=true` to validate and preview first, resolves player names for you, and re-reads the roster afterwards so you see the result. "My team" is the roster owned by the logged-in user; pass `roster_id` to act on another one (co-owners/commissioners).
+
+| Tool | What it does |
+| --- | --- |
+| `get_auth_status` | Who the session belongs to, how it was configured, token expiry, whether writes are enabled. Call it first to verify a token. |
+| `get_pending_transactions` | Open trade offers (sent/received, who still has to accept) and pending waiver claims for your team, with names resolved. `all_teams` / `include_finished` widen it. |
+| `set_lineup` | Start/bench swaps (`moves: [{start, bench?}]`) or a full `starters` list. Checks slot eligibility (FLEX/SUPER_FLEX/IDP), IR/taxi status and duplicates before sending. |
+| `update_ir` | Move players onto/off IR. A starter is benched first so the lineup stays valid; slot counts are enforced. |
+| `update_taxi` | Move players onto/off the taxi squad, same guarantees. `force` for commissioner overrides. Note: most leagues block taxi additions once the regular season starts, and Sleeper enforces that server-side. |
+| `add_drop_player` | Free-agent add and/or drop, refusing players who are already rostered. |
+| `submit_waiver_claim` | Waiver claim with optional drop and FAAB `bid` (required in FAAB leagues, capped at your budget). Sleeper checks roster room at submission time, so a full roster needs a `drop`. |
+| `cancel_waiver_claim` | Cancel one of your pending claims. |
+| `propose_trade` | Offer players to another manager (`partner` = username, display name, team name or roster_id); `counter_transaction_id` rejects their offer and sends yours in one step. |
+| `respond_to_trade` | Accept or reject an offer you received, or cancel one you sent. |
+| `post_league_message` | Post in the league chat (e.g. pitch a trade). |
+
+Write tools carry `readOnlyHint: false` so clients can ask for confirmation. Start with `--read-only` to keep the two private reads and drop every write tool even though a session exists.
+
+> **Heads-up:** the private API is undocumented and unsupported by Sleeper; field names and behaviour can change without notice. Use a session you are comfortable exposing to the machine running the server, and confirm each change in the Sleeper app the first few times.
+
+**Getting a token:** log in at [sleeper.com](https://sleeper.com), open DevTools → Network, click any `graphql` request and copy the value of the `authorization` request header (a long `eyJ...` JWT). Set it as `SLEEPER_TOKEN`. Tokens are long-lived but do expire; `get_auth_status` tells you when. Alternatively set `SLEEPER_EMAIL` + `SLEEPER_PASSWORD` and the server logs in on first use (accounts with 2FA/captcha challenges need the token route).
+
 ### Prompts
 
 - `weekly_briefing(league_id, username, week?)` — matchup preview, lineup check, waiver targets, league news.
@@ -182,11 +207,14 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `SLEEPER_USERNAME` | Your Sleeper username (or user_id). Tools that take a user/team default to it, so "my team" questions need no selector. | unset |
+| `SLEEPER_TOKEN` | Sleeper session JWT (see [Account tools](#account-tools-optional-session)). Enables the private reads and the lineup/IR/taxi/waiver/trade/chat tools. | unset (reads only) |
+| `SLEEPER_EMAIL`, `SLEEPER_PASSWORD` | Alternative to `SLEEPER_TOKEN`: log in with your Sleeper credentials on first use. | unset |
+| `SLEEPER_MCP_READ_ONLY` | `1`/`true` keeps write tools off even when a session is configured (same as `--read-only`). | unset |
 | `SLEEPER_MCP_AUTH_TOKEN` | If set, HTTP clients must send `Authorization: Bearer <token>`. | unset (no auth) |
 | `SLEEPER_MCP_CACHE_DIR` | Where the player database is cached on disk. Set to an empty string to disable. | `~/.cache/sleeper-mcp` |
 | `PORT`, `HOST` | HTTP bind defaults (`--port`/`--host` override). | `3000`, `0.0.0.0` |
 
-CLI flags: `--http`, `--port <n>`, `--host <addr>`, `--user <name>`, `--no-preload`, `--help`, `--version`.
+CLI flags: `--http`, `--port <n>`, `--host <addr>`, `--user <name>`, `--read-only`, `--no-preload`, `--help`, `--version`.
 
 ## How it works
 

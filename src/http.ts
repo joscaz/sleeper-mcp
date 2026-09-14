@@ -54,6 +54,8 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
         players_loaded: ctx.players.isLoaded,
         players: ctx.players.count,
         requests_sent: ctx.client.requestsSent,
+        sleeper_session: Boolean(ctx.auth),
+        writes_enabled: ctx.allowWrites,
       });
       return;
     }
@@ -111,7 +113,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const actualPort = typeof address === "object" && address ? address.port : port;
   const displayHost = host === "0.0.0.0" || host === "::" ? "localhost" : host;
   const publicUrl = `http://${displayHost}:${actualPort}${mcpPath}`;
-  ctx.log(`listening on ${publicUrl}${authToken ? " (bearer auth enabled)" : ""}`);
+  ctx.log(`listening on ${publicUrl}${authToken ? " (bearer auth enabled)" : ""}${ctx.auth ? (ctx.allowWrites ? " (Sleeper session: account write tools enabled)" : " (Sleeper session: read-only)") : ""}`);
 
   return {
     httpServer,

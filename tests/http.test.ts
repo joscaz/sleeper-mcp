@@ -82,3 +82,32 @@ describe("Streamable HTTP transport", () => {
     expect(res.status).toBe(405);
   });
 });
+
+describe("Sleeper session vs HTTP bearer auth", () => {
+  it("does not turn the Sleeper session token into the /mcp bearer token", async () => {
+    const sleeper = testClient(fakeFetch());
+    const running = await startHttpServer({
+      host: "127.0.0.1",
+      port: 0,
+      client: sleeper,
+      players: new PlayerStore(sleeper, { cacheDir: null }),
+      log: () => {},
+      preloadPlayers: false,
+      sleeperToken: "eyJ.fake.jwt",
+    });
+    try {
+      const health = await (await fetch(`${running.url.replace(/\/mcp$/, "")}/health`)).json();
+      expect(health).toMatchObject({ sleeper_session: true, writes_enabled: true });
+      const res = await fetch(running.url, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { result: { tools: { name: string }[] } };
+      expect(body.result.tools.map((x) => x.name)).toContain("set_lineup");
+    } finally {
+      await running.close();
+    }
+  });
+});
