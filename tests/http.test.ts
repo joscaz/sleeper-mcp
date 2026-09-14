@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { startHttpServer, type RunningHttpServer } from "../src/http.js";
+import { isLoopback, startHttpServer, type RunningHttpServer } from "../src/http.js";
 import { PlayerStore } from "../src/sleeper/players.js";
 import { fakeFetch, testClient } from "./helpers.js";
 import { LEAGUE_ID } from "./fixtures.js";
@@ -109,5 +109,58 @@ describe("Sleeper session vs HTTP bearer auth", () => {
     } finally {
       await running.close();
     }
+  });
+});
+
+describe("unauthenticated account write tools", () => {
+  const sessionOptions = (host: string, extra: Record<string, unknown> = {}) => {
+    const sleeper = testClient(fakeFetch());
+    return {
+      host,
+      port: 0,
+      client: sleeper,
+      players: new PlayerStore(sleeper, { cacheDir: null }),
+      log: () => {},
+      preloadPlayers: false,
+      sleeperToken: "eyJ.fake.jwt",
+      authToken: null,
+      ...extra,
+    };
+  };
+
+  it("refuses to listen on a non-loopback address without a bearer token", async () => {
+    await expect(startHttpServer(sessionOptions("0.0.0.0"))).rejects.toThrow(/SLEEPER_MCP_AUTH_TOKEN/);
+  });
+
+  it("starts on a non-loopback address when a bearer token is set", async () => {
+    const running = await startHttpServer(sessionOptions("0.0.0.0", { authToken: "s3cret" }));
+    try {
+      const res = await fetch(running.url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: "{}" });
+      expect(res.status).toBe(401);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("starts on a non-loopback address when the session is read-only", async () => {
+    const running = await startHttpServer(sessionOptions("0.0.0.0", { allowWrites: false }));
+    try {
+      const health = await (await fetch(`${running.url.replace(/\/mcp$/, "")}/health`)).json();
+      expect(health).toMatchObject({ sleeper_session: true, writes_enabled: false });
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("starts without a token on loopback, or anywhere with the explicit override", async () => {
+    const local = await startHttpServer(sessionOptions("127.0.0.1"));
+    await local.close();
+    const overridden = await startHttpServer(sessionOptions("0.0.0.0", { insecureNoAuth: true }));
+    await overridden.close();
+  });
+
+  it("classifies loopback addresses", () => {
+    for (const h of ["127.0.0.1", "127.0.0.53", "localhost", "LOCALHOST", "::1", "[::1]", "::ffff:127.0.0.1"]) expect(isLoopback(h), h).toBe(true);
+    for (const h of ["0.0.0.0", "::", "192.168.1.10", "10.0.0.1", "example.com", ""]) expect(isLoopback(h), h).toBe(false);
   });
 });

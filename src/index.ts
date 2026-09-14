@@ -26,7 +26,9 @@ Environment:
   SLEEPER_EMAIL,
   SLEEPER_PASSWORD            Alternative to SLEEPER_TOKEN: log in with your Sleeper credentials
   SLEEPER_MCP_READ_ONLY       Same as --read-only when set to 1/true
-  SLEEPER_MCP_AUTH_TOKEN      If set, HTTP clients must send "Authorization: Bearer <token>"
+  SLEEPER_MCP_AUTH_TOKEN      If set, HTTP clients must send "Authorization: Bearer <token>".
+                              Required for --http when a Sleeper session has writes enabled and the
+                              bind address is not loopback (SLEEPER_MCP_INSECURE_NO_AUTH=1 overrides)
   SLEEPER_MCP_CACHE_DIR       Where to cache the player database (default: ~/.cache/sleeper-mcp)
   PORT, HOST                  HTTP defaults
 `;

@@ -104,7 +104,7 @@ SLEEPER_MCP_AUTH_TOKEN=change-me node dist/index.js --http --port 3000
 # Health check:  http://localhost:3000/healthz
 ```
 
-Clients connect with the URL `http://host:3000/mcp` and, if a token is set, the header `Authorization: Bearer change-me`. This works for Replit, Claude's remote MCP connectors, and anything else that speaks Streamable HTTP. The server is stateless (no sessions), so it can sit behind a load balancer or run on serverless platforms.
+Clients connect with the URL `http://host:3000/mcp` and, if a token is set, the header `Authorization: Bearer change-me`. When a Sleeper session is configured with write tools enabled, the token is mandatory unless the server is bound to loopback (`--host 127.0.0.1`): anyone who can reach an unauthenticated `/mcp` could otherwise change your lineups, drop players and send trades. The server refuses to start in that configuration. This works for Replit, Claude's remote MCP connectors, and anything else that speaks Streamable HTTP. The server is stateless (no sessions), so it can sit behind a load balancer or run on serverless platforms.
 
 ```bash
 docker build -t sleeper-mcp .
@@ -210,7 +210,8 @@ Write tools carry `readOnlyHint: false` so clients can ask for confirmation. Sta
 | `SLEEPER_TOKEN` | Sleeper session JWT (see [Account tools](#account-tools-optional-session)). Enables the private reads and the lineup/IR/taxi/waiver/trade/chat tools. | unset (reads only) |
 | `SLEEPER_EMAIL`, `SLEEPER_PASSWORD` | Alternative to `SLEEPER_TOKEN`: log in with your Sleeper credentials on first use. | unset |
 | `SLEEPER_MCP_READ_ONLY` | `1`/`true` keeps write tools off even when a session is configured (same as `--read-only`). | unset |
-| `SLEEPER_MCP_AUTH_TOKEN` | If set, HTTP clients must send `Authorization: Bearer <token>`. | unset (no auth) |
+| `SLEEPER_MCP_AUTH_TOKEN` | If set, HTTP clients must send `Authorization: Bearer <token>`. Required in HTTP mode when a Sleeper session has writes enabled and the server is not bound to loopback: it refuses to start otherwise. | unset (no auth) |
+| `SLEEPER_MCP_INSECURE_NO_AUTH` | Set to `1` to run account write tools on a non-loopback address without a bearer token, for deployments that authenticate in front of the server. | unset |
 | `SLEEPER_MCP_CACHE_DIR` | Where the player database is cached on disk. Set to an empty string to disable. | `~/.cache/sleeper-mcp` |
 | `PORT`, `HOST` | HTTP bind defaults (`--port`/`--host` override). | `3000`, `0.0.0.0` |
 
