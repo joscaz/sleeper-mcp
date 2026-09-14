@@ -25,11 +25,14 @@ export interface ContextOptions {
   defaultUser?: string | null;
   /** Pre-built authenticated client (tests), or credentials to build one. */
   auth?: SleeperGraphqlClient | null;
-  /** Session JWT for Sleeper's private API (SLEEPER_TOKEN). */
-  authToken?: string | null;
+  /**
+   * Session JWT for Sleeper's private API (SLEEPER_TOKEN). Deliberately not called `authToken`:
+   * that name is the /mcp bearer token in HttpServerOptions, and the two objects are spread together.
+   */
+  sleeperToken?: string | null;
   /** Username/email + password login instead of a token (SLEEPER_EMAIL / SLEEPER_PASSWORD). */
-  authEmail?: string | null;
-  authPassword?: string | null;
+  sleeperEmail?: string | null;
+  sleeperPassword?: string | null;
   /** Register write tools when a session exists (default true; CLI --read-only disables). */
   allowWrites?: boolean;
 }
@@ -40,8 +43,8 @@ export function createContext(options: ContextOptions = {}): ServerContext {
   const players = options.players ?? new PlayerStore(client, { cacheDir: options.cacheDir, log });
   const defaultUser = options.defaultUser?.trim() || null;
   let auth: SleeperGraphqlClient | null = options.auth ?? null;
-  if (!auth && (options.authToken?.trim() || (options.authEmail?.trim() && options.authPassword))) {
-    auth = new SleeperGraphqlClient({ token: options.authToken, email: options.authEmail, password: options.authPassword, log });
+  if (!auth && (options.sleeperToken?.trim() || (options.sleeperEmail?.trim() && options.sleeperPassword))) {
+    auth = new SleeperGraphqlClient({ token: options.sleeperToken, email: options.sleeperEmail, password: options.sleeperPassword, log });
   }
   const allowWrites = Boolean(auth) && (options.allowWrites ?? true);
   return { client, players, log, defaultUser, auth, allowWrites };

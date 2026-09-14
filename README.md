@@ -177,9 +177,9 @@ Registered only when a Sleeper session is configured (`SLEEPER_TOKEN`, or `SLEEP
 | `get_pending_transactions` | Open trade offers (sent/received, who still has to accept) and pending waiver claims for your team, with names resolved. `all_teams` / `include_finished` widen it. |
 | `set_lineup` | Start/bench swaps (`moves: [{start, bench?}]`) or a full `starters` list. Checks slot eligibility (FLEX/SUPER_FLEX/IDP), IR/taxi status and duplicates before sending. |
 | `update_ir` | Move players onto/off IR. A starter is benched first so the lineup stays valid; slot counts are enforced. |
-| `update_taxi` | Move players onto/off the taxi squad, same guarantees. `force` for commissioner overrides. |
+| `update_taxi` | Move players onto/off the taxi squad, same guarantees. `force` for commissioner overrides. Note: most leagues block taxi additions once the regular season starts, and Sleeper enforces that server-side. |
 | `add_drop_player` | Free-agent add and/or drop, refusing players who are already rostered. |
-| `submit_waiver_claim` | Waiver claim with optional drop and FAAB `bid` (required in FAAB leagues, capped at your budget). |
+| `submit_waiver_claim` | Waiver claim with optional drop and FAAB `bid` (required in FAAB leagues, capped at your budget). Sleeper checks roster room at submission time, so a full roster needs a `drop`. |
 | `cancel_waiver_claim` | Cancel one of your pending claims. |
 | `propose_trade` | Offer players to another manager (`partner` = username, display name, team name or roster_id); `counter_transaction_id` rejects their offer and sends yours in one step. |
 | `respond_to_trade` | Accept or reject an offer you received, or cancel one you sent. |

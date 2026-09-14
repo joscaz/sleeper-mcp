@@ -29,7 +29,10 @@ export async function guard(fn: () => Promise<unknown>): Promise<CallToolResult>
         );
       }
       if (err.status === 429) return errorResult("Sleeper is rate limiting requests right now. Wait a few seconds and try again.");
-      return errorResult(`Sleeper refused the change: ${err.message}`);
+      const hint = /roster is either invalid/i.test(err.message)
+        ? " Sleeper checks roster room when a claim or add is submitted, not when it processes: name a drop, or free a spot (IR) first."
+        : "";
+      return errorResult(`Sleeper refused the change: ${err.message}${hint}`);
     }
     if (err instanceof SleeperApiError) {
       if (err.status === 429) return errorResult("Sleeper is rate limiting requests right now. Wait a few seconds and try again.");

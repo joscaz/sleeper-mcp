@@ -400,6 +400,16 @@ describe("add_drop_player / submit_waiver_claim / cancel_waiver_claim", () => {
     expect(data!.transaction).toMatchObject({ transaction_id: "w7", status: "pending", pending: true, faab_bid: 12, sequence: 1 });
   });
 
+  it("adds a roster room hint to Sleeper's invalid-roster refusal", async () => {
+    const { call } = await connectWithAuth({
+      submit_waiver_claim: () => raw(200, { data: { submit_waiver_claim: null }, errors: [{ message: "Your roster is either invalid or will be invalid after this move.", path: ["submit_waiver_claim"] }] }),
+    });
+    const { result, text } = await call("submit_waiver_claim", { league_id: LEAGUE_ID, add: "Rookie Runner", bid: 1 });
+    expect(result.isError).toBe(true);
+    expect(text).toContain("roster is either invalid");
+    expect(text).toContain("name a drop");
+  });
+
   it("cancels a claim using the week it was found in", async () => {
     const { call, gql } = await connectWithAuth({
       league_transactions_filtered: () => [pendingClaim, pendingTrade],

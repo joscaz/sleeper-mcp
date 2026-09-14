@@ -120,14 +120,14 @@ async function main(): Promise<void> {
 
   const cacheDir = process.env.SLEEPER_MCP_CACHE_DIR === "" ? null : process.env.SLEEPER_MCP_CACHE_DIR;
   const defaultUser = args.user ?? process.env.SLEEPER_USERNAME?.trim() ?? null;
-  const authToken = process.env.SLEEPER_TOKEN?.trim() || null;
-  const authEmail = process.env.SLEEPER_EMAIL?.trim() || null;
-  const authPassword = process.env.SLEEPER_PASSWORD || null;
+  const sleeperToken = process.env.SLEEPER_TOKEN?.trim() || null;
+  const sleeperEmail = process.env.SLEEPER_EMAIL?.trim() || null;
+  const sleeperPassword = process.env.SLEEPER_PASSWORD || null;
   const allowWrites = !(args.readOnly || /^(1|true|yes)$/i.test(process.env.SLEEPER_MCP_READ_ONLY ?? ""));
-  const auth = { authToken, authEmail, authPassword, allowWrites };
+  const session = { sleeperToken, sleeperEmail, sleeperPassword, allowWrites };
 
   if (args.http) {
-    const running = await startHttpServer({ host: args.host, port: args.port, preloadPlayers: args.preload, cacheDir, defaultUser, ...auth });
+    const running = await startHttpServer({ host: args.host, port: args.port, preloadPlayers: args.preload, cacheDir, defaultUser, ...session });
     const shutdown = () => {
       running.close().finally(() => process.exit(0));
     };
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
   }
 
   // stdio: never write anything but JSON-RPC to stdout.
-  const { server, ctx } = createServer({ preloadPlayers: args.preload, cacheDir, defaultUser, ...auth });
+  const { server, ctx } = createServer({ preloadPlayers: args.preload, cacheDir, defaultUser, ...session });
   process.stdout.on("error", (err: NodeJS.ErrnoException) => {
     // The client went away mid-write; exit quietly instead of dumping a stack trace.
     if (err.code === "EPIPE") process.exit(0);
