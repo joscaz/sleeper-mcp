@@ -13,6 +13,12 @@ export interface HttpServerOptions extends CreateServerOptions {
   corsOrigin?: string;
   /** Path the MCP endpoint is served on (default "/mcp"). */
   path?: string;
+  /**
+   * Allow account write tools on a non-loopback address without a bearer token. Off by default:
+   * the server refuses to start in that configuration. Read from SLEEPER_MCP_INSECURE_NO_AUTH.
+   * Only for deployments that terminate authentication in front of the server.
+   */
+  insecureNoAuth?: boolean;
 }
 
 export interface RunningHttpServer {
@@ -35,7 +41,18 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const authToken = options.authToken === undefined ? (process.env.SLEEPER_MCP_AUTH_TOKEN ?? null) : options.authToken;
   const corsOrigin = options.corsOrigin ?? "*";
   const mcpPath = options.path ?? "/mcp";
+  const insecureNoAuth = options.insecureNoAuth ?? /^(1|true|yes)$/i.test(process.env.SLEEPER_MCP_INSECURE_NO_AUTH ?? "");
   const { server, ctx } = createServer(options);
+
+  if (ctx.auth && ctx.allowWrites && !authToken && !isLoopback(host) && !insecureNoAuth) {
+    throw new Error(
+      `Refusing to start: a Sleeper session with account write tools enabled would listen on ${host} ` +
+        "without authentication, so anyone who can reach this port could change your lineups, drop players " +
+        "and send trades. Set SLEEPER_MCP_AUTH_TOKEN (clients then send \"Authorization: Bearer <token>\"), " +
+        "bind to loopback with --host 127.0.0.1, or pass --read-only. If authentication is handled in front " +
+        "of this server, set SLEEPER_MCP_INSECURE_NO_AUTH=1 to override.",
+    );
+  }
 
   const httpServer = createHttpServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -114,6 +131,9 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const displayHost = host === "0.0.0.0" || host === "::" ? "localhost" : host;
   const publicUrl = `http://${displayHost}:${actualPort}${mcpPath}`;
   ctx.log(`listening on ${publicUrl}${authToken ? " (bearer auth enabled)" : ""}${ctx.auth ? (ctx.allowWrites ? " (Sleeper session: account write tools enabled)" : " (Sleeper session: read-only)") : ""}`);
+  if (ctx.auth && ctx.allowWrites && !authToken && !isLoopback(host)) {
+    ctx.log("WARNING: account write tools are reachable without authentication (SLEEPER_MCP_INSECURE_NO_AUTH is set)");
+  }
 
   return {
     httpServer,
@@ -125,6 +145,12 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
         httpServer.closeAllConnections?.();
       }),
   };
+}
+
+/** True for bind addresses that only accept connections from the local machine. */
+export function isLoopback(host: string): boolean {
+  const h = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return h === "localhost" || h === "::1" || h === "::ffff:127.0.0.1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
 }
 
 function authorized(req: IncomingMessage, token: string): boolean {

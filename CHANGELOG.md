@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Optional Sleeper session (`SLEEPER_TOKEN`, or `SLEEPER_EMAIL` + `SLEEPER_PASSWORD`) backed by Sleeper's private GraphQL API, with 2 private reads (`get_auth_status`, `get_pending_transactions`) and 9 write tools: `set_lineup`, `update_ir`, `update_taxi`, `add_drop_player`, `submit_waiver_claim`, `cancel_waiver_claim`, `propose_trade`, `respond_to_trade`, `post_league_message`. Every write validates locally (slot eligibility, IR/taxi limits, roster ownership, FAAB budget), supports `dry_run`, and returns the refreshed roster/transaction. `--read-only` / `SLEEPER_MCP_READ_ONLY` keeps writes off; the health endpoint reports `sleeper_session` and `writes_enabled`.
 - Optional default user via `--user <name>` / `SLEEPER_USERNAME`, so "my team" and "my leagues" questions work without naming yourself ([#1](https://github.com/joscaz/sleeper-mcp/pull/1)).
 - Open-source project files: contributing guide, code of conduct, security policy, issue and PR templates, Dependabot, and a tag-triggered release workflow.
+- HTTP mode refuses to start when a Sleeper session with write tools enabled would listen on a non-loopback address without `SLEEPER_MCP_AUTH_TOKEN`. `SLEEPER_MCP_INSECURE_NO_AUTH=1` overrides for deployments that authenticate in front of the server.
 
 ## [0.1.0] - 2026-09-11
 
