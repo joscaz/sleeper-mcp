@@ -46,7 +46,7 @@ export function testClient(ff: FakeFetch = fakeFetch()): SleeperClient {
 }
 
 /** Full server + MCP client wired over an in-memory transport. */
-export async function connectedClient(overrides: Record<string, unknown> = {}, options: { defaultUser?: string } = {}) {
+export async function connectedClient(overrides: Record<string, unknown> = {}, options: Partial<import("../src/server.js").CreateServerOptions> = {}) {
   const ff = fakeFetch(overrides);
   const sleeper = testClient(ff);
   const players = new PlayerStore(sleeper, { cacheDir: null });

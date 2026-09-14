@@ -8,6 +8,7 @@ import { registerTransactionTools } from "./tools/transactions.js";
 import { registerDraftTools } from "./tools/drafts.js";
 import { registerPlayerTools } from "./tools/players.js";
 import { registerStatTools } from "./tools/stats.js";
+import { registerAccountTools } from "./tools/account.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { name: string; version: string };
@@ -15,7 +16,7 @@ const pkg = require("../package.json") as { name: string; version: string };
 export const SERVER_NAME = "sleeper-mcp";
 export const SERVER_VERSION: string = pkg.version;
 
-export const SERVER_INSTRUCTIONS = `Sleeper fantasy football (read-only public API, no login required).
+export const SERVER_INSTRUCTIONS = `Sleeper fantasy football (public API for reads, no login required).
 
 Typical flow:
 1. get_user / get_user_leagues to turn a username into league_ids.
@@ -35,9 +36,14 @@ export interface CreateServerOptions extends ContextOptions {
 
 export function createServer(options: CreateServerOptions = {}): { server: McpServer; ctx: ServerContext } {
   const ctx = createContext(options);
-  const instructions = ctx.defaultUser
+  let instructions = ctx.defaultUser
     ? `${SERVER_INSTRUCTIONS}\n- Default user: "${ctx.defaultUser}". For "my team" / "my leagues" questions, omit the user/team selector and this user is assumed.`
     : SERVER_INSTRUCTIONS;
+  if (ctx.auth) {
+    instructions += ctx.allowWrites
+      ? `\n- A Sleeper session is configured: get_auth_status / get_pending_transactions read private data, and set_lineup, update_ir, update_taxi, add_drop_player, submit_waiver_claim, cancel_waiver_claim, propose_trade, respond_to_trade, post_league_message change the real account. Confirm with the manager before any write; dry_run=true previews a change.`
+      : `\n- A Sleeper session is configured in read-only mode: get_auth_status / get_pending_transactions are available, write tools are disabled.`;
+  }
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions });
 
   registerLeagueTools(server, ctx);
@@ -46,6 +52,7 @@ export function createServer(options: CreateServerOptions = {}): { server: McpSe
   registerDraftTools(server, ctx);
   registerPlayerTools(server, ctx);
   registerStatTools(server, ctx);
+  registerAccountTools(server, ctx);
   registerPrompts(server);
   registerResources(server, ctx);
 

@@ -1,4 +1,5 @@
 import { SleeperClient, SleeperNotFoundError } from "./sleeper/client.js";
+import { SleeperGraphqlClient } from "./sleeper/graphql.js";
 import { PlayerStore } from "./sleeper/players.js";
 import type { League, LeagueUser, NflState, Roster, Sport } from "./sleeper/types.js";
 import { buildTeamIndex, type TeamRef } from "./format.js";
@@ -9,6 +10,10 @@ export interface ServerContext {
   log: (message: string) => void;
   /** Username or user_id assumed when a tool is called without a user/team selector ("my team"). */
   defaultUser: string | null;
+  /** Authenticated Sleeper session (private GraphQL API); null when no credentials are configured. */
+  auth: SleeperGraphqlClient | null;
+  /** Whether tools that change the account (lineup, waivers, trades, ...) are registered. */
+  allowWrites: boolean;
 }
 
 export interface ContextOptions {
@@ -18,6 +23,15 @@ export interface ContextOptions {
   cacheDir?: string | null;
   /** Default Sleeper username or user_id (CLI --user / SLEEPER_USERNAME). */
   defaultUser?: string | null;
+  /** Pre-built authenticated client (tests), or credentials to build one. */
+  auth?: SleeperGraphqlClient | null;
+  /** Session JWT for Sleeper's private API (SLEEPER_TOKEN). */
+  authToken?: string | null;
+  /** Username/email + password login instead of a token (SLEEPER_EMAIL / SLEEPER_PASSWORD). */
+  authEmail?: string | null;
+  authPassword?: string | null;
+  /** Register write tools when a session exists (default true; CLI --read-only disables). */
+  allowWrites?: boolean;
 }
 
 export function createContext(options: ContextOptions = {}): ServerContext {
@@ -25,7 +39,12 @@ export function createContext(options: ContextOptions = {}): ServerContext {
   const client = options.client ?? new SleeperClient();
   const players = options.players ?? new PlayerStore(client, { cacheDir: options.cacheDir, log });
   const defaultUser = options.defaultUser?.trim() || null;
-  return { client, players, log, defaultUser };
+  let auth: SleeperGraphqlClient | null = options.auth ?? null;
+  if (!auth && (options.authToken?.trim() || (options.authEmail?.trim() && options.authPassword))) {
+    auth = new SleeperGraphqlClient({ token: options.authToken, email: options.authEmail, password: options.authPassword, log });
+  }
+  const allowWrites = Boolean(auth) && (options.allowWrites ?? true);
+  return { client, players, log, defaultUser, auth, allowWrites };
 }
 
 /** Thrown for user-facing problems (bad input, unknown league, ...). The message is shown to the model verbatim. */

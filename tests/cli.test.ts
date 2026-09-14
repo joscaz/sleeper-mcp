@@ -3,7 +3,7 @@ import { parseArgs } from "../src/index.js";
 
 describe("CLI argument parsing", () => {
   it("defaults to stdio", () => {
-    expect(parseArgs([])).toEqual({ http: false, preload: true, help: false, version: false });
+    expect(parseArgs([])).toEqual({ http: false, readOnly: false, preload: true, help: false, version: false });
   });
 
   it("parses http options in both forms", () => {
@@ -27,5 +27,12 @@ describe("CLI argument parsing", () => {
     expect(() => parseArgs(["--port", "abc"])).toThrow(/Invalid --port/);
     expect(() => parseArgs(["--user"])).toThrow(/Missing value for --user/);
     expect(() => parseArgs(["--wat"])).toThrow(/Unknown option/);
+  });
+});
+
+describe("CLI --read-only", () => {
+  it("parses the flag", () => {
+    expect(parseArgs(["--read-only"]).readOnly).toBe(true);
+    expect(parseArgs(["--http", "--read-only", "--user", "alice"])).toMatchObject({ http: true, readOnly: true, user: "alice" });
   });
 });
