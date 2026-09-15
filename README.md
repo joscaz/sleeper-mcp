@@ -174,7 +174,7 @@ Registered only when a Sleeper session is configured (`SLEEPER_TOKEN`, or `SLEEP
 | Tool | What it does |
 | --- | --- |
 | `get_auth_status` | Who the session belongs to, how it was configured, token expiry, whether writes are enabled. Call it first to verify a token. |
-| `get_pending_transactions` | Open trade offers (sent/received, who still has to accept) and pending waiver claims for your team, with names resolved. `all_teams` / `include_finished` widen it. |
+| `get_pending_transactions` | Open trade offers (sent/received, who still has to accept) and pending waiver claims for your team, with names resolved. `all_teams` / `include_finished` widen it. |. Looks at the current and previous week by default, since open claims and offers stay filed under the week they were created in.
 | `set_lineup` | Start/bench swaps (`moves: [{start, bench?}]`) or a full `starters` list. Checks slot eligibility (FLEX/SUPER_FLEX/IDP), IR/taxi status and duplicates before sending. |
 | `update_ir` | Move players onto/off IR. A starter is benched first so the lineup stays valid; slot counts are enforced. |
 | `update_taxi` | Move players onto/off the taxi squad, same guarantees. `force` for commissioner overrides. Note: most leagues block taxi additions once the regular season starts, and Sleeper enforces that server-side. |
