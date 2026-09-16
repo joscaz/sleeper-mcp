@@ -70,12 +70,12 @@ export function registerAccountTools(server: McpServer, ctx: ServerContext): voi
     {
       title: "Pending trades and waiver claims",
       description:
-        "Open transactions the public API hides: trade offers waiting for a response (sent and received) and waiver claims queued for the next waiver run, with players and teams resolved. Defaults to the logged-in team's transactions for the current week; set all_teams=true for league-wide pending trades.",
+        "Open transactions the public API hides: trade offers waiting for a response (sent and received) and waiver claims queued for the next waiver run, with players and teams resolved. Defaults to the logged-in team's transactions for the current and previous week (claims filed before Sleeper rolls the week over stay filed under the old week until they process); pass week to look at one week only. Set all_teams=true for league-wide pending trades.",
       inputSchema: {
         league_id: leagueIdSchema,
         week: weekSchema,
         all_teams: z.boolean().default(false).describe("Include transactions that do not involve the logged-in team."),
-        include_finished: z.boolean().default(false).describe("Also return completed/failed/rejected transactions from that week."),
+        include_finished: z.boolean().default(false).describe("Also return completed/failed/rejected transactions from those weeks."),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -84,8 +84,11 @@ export function registerAccountTools(server: McpServer, ctx: ServerContext): voi
         const bundle = await loadLeague(ctx, league_id);
         await ctx.players.ensureLoaded();
         const { week: leg } = await resolveWeek(ctx, week);
+        // Sleeper files a transaction under the week it was created in and leaves it there while it is
+        // open, so right after the rollover the queued claims and offers still live under last week.
+        const legs = week !== undefined ? [leg] : [...new Set([leg, Math.max(1, leg - 1)])];
         const roster = all_teams ? null : await resolveOwnRoster(ctx, bundle, undefined);
-        const list = await auth.transactions(bundle.league.league_id, { legs: [leg], rosterIds: roster ? [roster.roster_id] : undefined, limit: 200 });
+        const list = await auth.transactions(bundle.league.league_id, { legs, rosterIds: roster ? [roster.roster_id] : undefined, limit: 200 });
         const rows = list
           .filter((t) => include_finished || !FINISHED_TRANSACTION_STATUSES.has(t.status))
           .sort((a, b) => (b.created ?? 0) - (a.created ?? 0))
@@ -94,6 +97,7 @@ export function registerAccountTools(server: McpServer, ctx: ServerContext): voi
           league_id: bundle.league.league_id,
           league: bundle.league.name,
           week: leg,
+          weeks_searched: legs,
           team: roster ? teamLabel(bundle.teams, roster.roster_id) : "(all teams)",
           trades: rows.filter((r) => r.type === "trade"),
           waiver_claims: rows.filter((r) => r.type === "waiver"),

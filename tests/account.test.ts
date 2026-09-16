@@ -518,8 +518,8 @@ describe("get_pending_transactions", () => {
     });
     const { data, result } = await call("get_pending_transactions", { league_id: LEAGUE_ID });
     expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
-    expect(gql.last("league_transactions_filtered")!.vars).toMatchObject({ league_id: LEAGUE_ID, leg_filters: [5], roster_id_filters: [1] });
-    expect(data).toMatchObject({ week: 5, team: "Alice's Avengers (Alice)" });
+    expect(gql.last("league_transactions_filtered")!.vars).toMatchObject({ league_id: LEAGUE_ID, leg_filters: [5, 4], roster_id_filters: [1] });
+    expect(data).toMatchObject({ week: 5, weeks_searched: [5, 4], team: "Alice's Avengers (Alice)" });
     const trades = data!.trades as Record<string, unknown>[];
     expect(trades).toHaveLength(1);
     expect(trades[0]).toMatchObject({ transaction_id: "t9", direction: "received", awaiting: ["Alice's Avengers (Alice)"], pending: true });
@@ -530,6 +530,16 @@ describe("get_pending_transactions", () => {
     const all = await call("get_pending_transactions", { league_id: LEAGUE_ID, all_teams: true, include_finished: true });
     expect(gql.last("league_transactions_filtered")!.vars.roster_id_filters).toBeNull();
     expect((all.data!.trades as unknown[]).length).toBe(2);
+  });
+
+  it("searches only the requested week when one is given", async () => {
+    const { call, gql } = await connectWithAuth({
+      league_transactions_filtered: () => [pendingClaim],
+    });
+    const { data, result } = await call("get_pending_transactions", { league_id: LEAGUE_ID, week: 4 });
+    expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+    expect(gql.last("league_transactions_filtered")!.vars.leg_filters).toEqual([4]);
+    expect(data).toMatchObject({ week: 4, weeks_searched: [4] });
   });
 });
 
