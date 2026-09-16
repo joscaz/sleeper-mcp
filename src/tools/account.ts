@@ -445,8 +445,15 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** The roster the session user owns in this league (or an explicit roster_id, e.g. for commissioners). */
+/**
+ * The roster the session user owns in this league (or an explicit roster_id, e.g. for commissioners),
+ * refreshed from Sleeper's live store so a move made seconds ago is already reflected.
+ */
 export async function resolveOwnRoster(ctx: ServerContext, bundle: LeagueBundle, rosterId: number | undefined): Promise<Roster> {
+  return freshenRoster(ctx, bundle, await pickOwnRoster(ctx, bundle, rosterId));
+}
+
+async function pickOwnRoster(ctx: ServerContext, bundle: LeagueBundle, rosterId: number | undefined): Promise<Roster> {
   if (rosterId !== undefined) return resolveRoster(ctx, bundle, { roster_id: rosterId });
   const userId = ctx.auth?.userId;
   if (userId) {
@@ -456,6 +463,32 @@ export async function resolveOwnRoster(ctx: ServerContext, bundle: LeagueBundle,
   }
   if (!ctx.defaultUser) throw new ToolError("Could not tell which team is yours: pass roster_id or start the server with --user / SLEEPER_USERNAME.");
   return resolveRoster(ctx, bundle, {});
+}
+
+/**
+ * Overlay Sleeper's live view of a roster (players, starters, IR, taxi) on the public-API copy, which trails a
+ * write by a minute or two. Best effort: without a session, or if the read fails, the public copy is used as is.
+ */
+export async function freshenRoster(ctx: ServerContext, bundle: LeagueBundle, roster: Roster): Promise<Roster> {
+  if (!ctx.auth) return roster;
+  let live: GqlRoster | undefined;
+  try {
+    live = (await ctx.auth.rosters(bundle.league.league_id)).find((r) => r.roster_id === roster.roster_id);
+  } catch (err) {
+    ctx.log(`live roster read failed, using the public copy: ${(err as Error).message}`);
+    return roster;
+  }
+  if (!live) return roster;
+  const fresh: Roster = {
+    ...roster,
+    players: live.players ?? roster.players,
+    starters: live.starters ?? roster.starters,
+    reserve: live.reserve ?? null,
+    taxi: live.taxi ?? null,
+  };
+  const index = bundle.rosters.findIndex((r) => r.roster_id === roster.roster_id);
+  if (index >= 0) bundle.rosters[index] = fresh;
+  return fresh;
 }
 
 async function resolvePartner(ctx: ServerContext, bundle: LeagueBundle, partner: string): Promise<Roster> {

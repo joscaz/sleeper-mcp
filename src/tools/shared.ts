@@ -59,6 +59,12 @@ export const teamSelectorShape = {
   user_id: userIdSchema,
   roster_id: z.number().int().positive().optional().describe("Roster ID within the league (1..N)."),
   team_name: z.string().trim().min(1).optional().describe("Team name to match (case-insensitive, partial OK)."),
+  team: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe("Shortcut when you are not sure which kind of name you have: a manager's username or display name, or a team name (partial OK)."),
 };
 
 export const seasonSchema = z

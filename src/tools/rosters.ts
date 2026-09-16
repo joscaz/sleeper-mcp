@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { loadLeague, resolveRoster, resolveWeek, ToolError, type LeagueBundle, type ServerContext } from "../context.js";
+import { ToolError, hasTeamSelector, loadLeague, resolveRoster, resolveWeek, type LeagueBundle, type ServerContext } from "../context.js";
 import type { BracketMatch, Matchup, Roster } from "../sleeper/types.js";
 import type { PlayerRef } from "../sleeper/players.js";
 import { num, points, record, round, startingSlots, teamLabel } from "../format.js";
@@ -68,7 +68,7 @@ export function registerRosterTools(server: McpServer, ctx: ServerContext): void
         if (!matchups.length) {
           throw new ToolError(`No matchups for week ${resolvedWeek} in league "${bundle.league.name}" (league status: ${bundle.league.status}).`);
         }
-        const wantsOne = selector.roster_id !== undefined || selector.username || selector.user_id || selector.team_name;
+        const wantsOne = hasTeamSelector(selector);
         const only = wantsOne ? (await resolveRoster(ctx, bundle, selector)).roster_id : undefined;
         return describeMatchups(ctx, bundle, matchups, resolvedWeek, { include_bench, onlyRosterId: only });
       }),
