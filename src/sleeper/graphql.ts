@@ -333,6 +333,15 @@ export class SleeperGraphqlClient {
   // Roster management
   // ---------------------------------------------------------------------------
 
+  /** Every roster in a league from Sleeper's live store; the public API can trail a write by a minute or two. */
+  rosters(leagueId: string): Promise<GqlRoster[]> {
+    return this.execute<GqlRoster[]>(
+      "league_rosters",
+      `query league_rosters($league_id: Snowflake!) { league_rosters(league_id: $league_id) { ${ROSTER_FIELDS} } }`,
+      { league_id: leagueId },
+    );
+  }
+
   /** Replace the full starters array (league slot order; "0" marks an empty slot). */
   updateStarters(leagueId: string, rosterId: number, starters: string[]): Promise<GqlRoster> {
     return this.execute<GqlRoster>(

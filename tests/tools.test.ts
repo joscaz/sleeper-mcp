@@ -153,6 +153,11 @@ describe("rosters & matchups", () => {
     expect((await c.call("get_roster", { league_id: LEAGUE_ID, user_id: "333" })).data).toMatchObject({ team_name: "Carol Cartel" });
     expect((await c.call("get_roster", { league_id: LEAGUE_ID, username: "Bobby Tables" })).data).toMatchObject({ roster_id: 2 });
     expect((await c.call("get_roster", { league_id: LEAGUE_ID, team_name: "cartel" })).data).toMatchObject({ roster_id: 3 });
+    // `team` takes whatever name the caller has: username, display name or (partial) team name.
+    expect((await c.call("get_roster", { league_id: LEAGUE_ID, team: "bob" })).data).toMatchObject({ roster_id: 2 });
+    expect((await c.call("get_roster", { league_id: LEAGUE_ID, team: "Bobby Tables" })).data).toMatchObject({ roster_id: 2 });
+    expect((await c.call("get_roster", { league_id: LEAGUE_ID, team: "cartel" })).data).toMatchObject({ roster_id: 3 });
+    expect((await c.call("get_roster", { league_id: LEAGUE_ID, team: "nobody" })).result.isError).toBe(true);
     const bad = await c.call("get_roster", { league_id: LEAGUE_ID, team_name: "zzz" });
     expect(bad.result.isError).toBe(true);
     expect(bad.text).toContain("Alice's Avengers");
