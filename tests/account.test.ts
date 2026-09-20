@@ -227,6 +227,25 @@ describe("set_lineup", () => {
     expect(starters.find((s) => s.slot === "TE")?.name).toBe("Sam LaPorta");
   });
 
+  it("sees a player added seconds ago that the public roster does not list yet", async () => {
+    // The public API copy (fixtures) has no Rookie Runner; Sleeper's live store already does.
+    const { call, gql } = await connectWithAuth({
+      ...rosterEcho,
+      league_rosters: () => [{ ...ROSTER_1, players: [...ROSTER_1.players, "11000"] }],
+    });
+    const { data, result } = await call("set_lineup", { league_id: LEAGUE_ID, moves: [{ start: "Rookie Runner", bench: "Breece Hall" }] });
+    expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+    expect(gql.last("league_rosters")!.vars).toEqual({ league_id: LEAGUE_ID });
+    expect(data!.changes).toEqual(["RB: Breece Hall (RB, NYJ) → Rookie Runner (RB, GB)"]);
+    expect(gql.last("roster_update_starters")!.vars.starters).toEqual(["4046", "9226", "11000", "7564", "6794", "5850", "8112", "4195", "DET"]);
+  });
+
+  it("falls back to the public roster when the live read fails", async () => {
+    const { call } = await connectWithAuth({ ...rosterEcho, league_rosters: () => ({ __status: 500, body: { errors: [{ message: "boom" }] } }) });
+    const { result } = await call("set_lineup", { league_id: LEAGUE_ID, moves: [{ start: "Sam LaPorta", bench: "Travis Kelce" }] });
+    expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+  });
+
   it("swaps two starters when both are already in the lineup", async () => {
     const { call, gql } = await connectWithAuth(rosterEcho);
     const { data } = await call("set_lineup", { league_id: LEAGUE_ID, moves: [{ start: "Drake London", bench: "Justin Jefferson" }] });

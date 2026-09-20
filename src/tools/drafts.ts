@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { resolveRoster, resolveSeason, resolveUserId, loadLeague, ToolError, type ServerContext } from "../context.js";
+import { ToolError, hasTeamSelector, loadLeague, resolveRoster, resolveSeason, resolveUserId, type ServerContext } from "../context.js";
 import { SleeperNotFoundError } from "../sleeper/client.js";
 import type { Draft, DraftPick, LeagueUser } from "../sleeper/types.js";
 import { isoDate } from "../format.js";
@@ -87,7 +87,7 @@ export function registerDraftTools(server: McpServer, ctx: ServerContext): void 
         const byUser = new Map(users.map((u) => [u.user_id, u.display_name ?? u.username ?? u.user_id]));
         let filtered = picks;
         if (round !== undefined) filtered = filtered.filter((p) => p.round === round);
-        const wantsTeam = selector.roster_id !== undefined || selector.username || selector.user_id || selector.team_name;
+        const wantsTeam = hasTeamSelector(selector);
         if (wantsTeam) {
           if (!draft.league_id) throw new ToolError("This draft is not attached to a league, so picks cannot be filtered by team.");
           const bundle = await loadLeague(ctx, draft.league_id);

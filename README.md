@@ -113,7 +113,7 @@ docker run -p 3000:3000 -e SLEEPER_MCP_AUTH_TOKEN=change-me -v sleeper-cache:/da
 
 ## Tools
 
-Every tool that takes a team accepts any of `username` (or display name), `user_id`, `roster_id`, `team_name` (partial, case-insensitive), or nothing at all when `SLEEPER_USERNAME` is set. `week` defaults to the current NFL week and `season` to the current league season.
+Every tool that takes a team accepts any of `username` (or display name), `user_id`, `roster_id`, `team_name` (partial, case-insensitive), `team` (any of those names in one field, when you are not sure which kind you have), or nothing at all when `SLEEPER_USERNAME` is set. `week` defaults to the current NFL week and `season` to the current league season.
 
 ### Users & leagues
 

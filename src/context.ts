@@ -66,6 +66,13 @@ export interface UserSelector {
 export interface TeamSelector extends UserSelector {
   roster_id?: number;
   team_name?: string;
+  /** Username, display name or team name in one field. */
+  team?: string;
+}
+
+/** True when the selector names a specific team (as opposed to "whoever the default user is"). */
+export function hasTeamSelector(sel: TeamSelector): boolean {
+  return sel.roster_id !== undefined || !!sel.user_id || !!sel.username || !!sel.team_name || !!sel.team;
 }
 
 const NUMERIC_ID = /^\d{6,}$/;
@@ -131,7 +138,15 @@ export async function loadLeague(ctx: ServerContext, leagueId: string): Promise<
 export async function resolveRoster(ctx: ServerContext, bundle: LeagueBundle, sel: TeamSelector): Promise<Roster> {
   const { rosters, users, teams } = bundle;
 
-  if (sel.roster_id === undefined && !sel.user_id && !sel.username && !sel.team_name && ctx.defaultUser) {
+  if (sel.team && sel.roster_id === undefined && !sel.user_id && !sel.username && !sel.team_name) {
+    // One field for "whatever name I have": a manager match wins, otherwise fall through to team-name matching.
+    const raw = sel.team.trim();
+    const lower = raw.toLowerCase();
+    const member = users.find((u) => u.user_id === raw || u.username?.toLowerCase() === lower || u.display_name?.toLowerCase() === lower);
+    sel = member ? { user_id: member.user_id } : { team_name: raw };
+  }
+
+  if (!hasTeamSelector(sel) && ctx.defaultUser) {
     sel = { username: ctx.defaultUser };
   }
 
@@ -168,5 +183,5 @@ export async function resolveRoster(ctx: ServerContext, bundle: LeagueBundle, se
     return roster;
   }
 
-  throw new ToolError(`Identify the team with one of: roster_id, username, user_id or team_name. ${NO_USER_HINT}`);
+  throw new ToolError(`Identify the team with one of: team, roster_id, username, user_id or team_name. ${NO_USER_HINT}`);
 }
