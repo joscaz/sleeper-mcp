@@ -37,31 +37,17 @@ There are several community Sleeper MCP servers. This one focuses on the things 
 | Transports | stdio **and** Streamable HTTP (stateless, bearer auth, CORS, health check, Docker) | stdio only |
 | Player database (~5 MB) | memory + disk cache, daily refresh, stale-cache fallback | re-downloaded per process |
 | Rate limiting / retries | 600 req/min budget, backoff on 429/5xx, in-flight de-dup | none |
-| Tests | 60+ unit + integration tests (in-memory and HTTP transports) plus a live smoke test | varies |
+| Tests | 100+ unit + integration tests (in-memory and HTTP transports) plus a live smoke test | varies |
 | Tool annotations, `structuredContent`, prompts, resources | ✅ | partial |
 
-All 22 tools are read-only. Nothing here can change a lineup or make a trade.
+The 22 public-API tools are read-only and need no login. The 11 [account tools](#account-tools-optional-session) (2 private reads, 9 writes) are registered only when you configure a Sleeper session, and `--read-only` keeps the writes off even then.
 
 ## Quick start
 
-Requires Node.js 20+.
-
-### From source (today)
+Requires Node.js 20+. There is nothing to install up front: MCP clients launch the server with `npx`, which fetches it from npm on first run. To check that it runs:
 
 ```bash
-git clone https://github.com/joscaz/sleeper-mcp.git
-cd sleeper-mcp
-npm install
-npm run build
-node dist/index.js --help
-```
-
-Then point your MCP client at `node /absolute/path/to/sleeper-mcp/dist/index.js`.
-
-### From npm (once published)
-
-```bash
-npx -y @joscaz/sleeper-mcp
+npx -y @joscaz/sleeper-mcp --help
 ```
 
 ### Claude Desktop
@@ -72,25 +58,37 @@ npx -y @joscaz/sleeper-mcp
 {
   "mcpServers": {
     "sleeper": {
-      "command": "node",
-      "args": ["/absolute/path/to/sleeper-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@joscaz/sleeper-mcp"],
       "env": { "SLEEPER_USERNAME": "your_sleeper_username" }
     }
   }
 }
 ```
 
-(or `"command": "npx", "args": ["-y", "@joscaz/sleeper-mcp"]` after publishing.)
-
 ### Claude Code
 
 ```bash
-claude mcp add sleeper -e SLEEPER_USERNAME=your_sleeper_username -- node /absolute/path/to/sleeper-mcp/dist/index.js
+claude mcp add sleeper -e SLEEPER_USERNAME=your_sleeper_username -- npx -y @joscaz/sleeper-mcp
 ```
 
 ### Cursor / Windsurf / other stdio clients
 
-Same shape: command `node`, args `["/absolute/path/to/sleeper-mcp/dist/index.js"]`, env `SLEEPER_USERNAME`.
+Same shape: command `npx`, args `["-y", "@joscaz/sleeper-mcp"]`, env `SLEEPER_USERNAME`.
+
+### From source
+
+To run a local checkout instead (to hack on it, or to try unreleased changes):
+
+```bash
+git clone https://github.com/joscaz/sleeper-mcp.git
+cd sleeper-mcp
+npm install
+npm run build
+node dist/index.js --help
+```
+
+Then use command `node` with args `["/absolute/path/to/sleeper-mcp/dist/index.js"]` in any of the configs above.
 
 ### Make it yours
 
@@ -99,7 +97,7 @@ Sleeper's API is public and read-only, so there is no login step: every league, 
 ### Remote / hosted (Streamable HTTP)
 
 ```bash
-SLEEPER_MCP_AUTH_TOKEN=change-me node dist/index.js --http --port 3000
+SLEEPER_MCP_AUTH_TOKEN=change-me npx -y @joscaz/sleeper-mcp --http --port 3000
 # MCP endpoint:  http://localhost:3000/mcp   (POST, JSON-RPC)
 # Health check:  http://localhost:3000/healthz
 ```
