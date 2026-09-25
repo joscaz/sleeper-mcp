@@ -273,6 +273,18 @@ export interface TrendingPlayer {
   count: number;
 }
 
+/** One NFL game from Sleeper's (undocumented) schedule endpoint. */
+export interface ScheduleGame {
+  game_id: string;
+  week: number;
+  date: string | null;
+  home: string;
+  away: string;
+  /** pre_game, in_game or complete (canceled games also appear). */
+  status: string;
+  [key: string]: unknown;
+}
+
 /** Stat line as returned by the (undocumented) stats/projections endpoints. */
 export type StatLine = Record<string, number | null | undefined>;
 export type StatMap = Record<string, StatLine | null>;

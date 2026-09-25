@@ -63,6 +63,14 @@ async function main() {
   await call("get_draft_picks", { league_id: DOCS_LEAGUE, round: 1 }, (d) => `${d.returned} first-round picks, 1.01 = ${(d.picks as { player: string }[])[0]?.player}`);
   await call("get_free_agents", { league_id: DOCS_LEAGUE, position: "RB", limit: 3 }, (d) => (d.free_agents as { name: string }[]).map((p) => p.name).join(", "));
   await call("get_league_history", { league_id: DOCS_LEAGUE, max_seasons: 2 }, (d) => `${d.seasons_found} season(s)`);
+  await call("get_matchup_odds", { league_id: DOCS_LEAGUE, week: 1 }, (d) => {
+    const m = (d.matchups as { status: string; winner?: string }[])[0];
+    return `${(d.matchups as unknown[]).length} matchups; first is ${m?.status}, won by ${m?.winner ?? "?"}`;
+  });
+  await call("get_playoff_odds", { league_id: DOCS_LEAGUE }, (d) => {
+    const seeds = d.seeds as { team_name: string }[];
+    return `${d.status}: ${seeds.length} seeds, #1 ${seeds[0]?.team_name}`;
+  });
   await call("get_projections", { position: "QB", limit: 3 }, (d) => `${d.season} wk ${d.week}: ` + (d.players as { name: string; pts: number }[]).map((p) => `${p.name} ${p.pts}`).join(", "));
   await call("get_player_stats", { week: 0, position: "RB", limit: 3, season: "2025" }, (d) => `${d.season} season: ` + (d.players as { name: string; pts: number }[]).map((p) => `${p.name} ${p.pts}`).join(", "));
 
@@ -77,6 +85,14 @@ async function main() {
       await call("get_roster", { league_id: first.league_id, username }, (d) => `${d.team_name} ${d.record}`);
       await call("get_matchups", { league_id: first.league_id, username }, (d) => `week ${d.week}: ${(d.matchups as unknown[]).length} matchup(s)`);
       await call("get_lineup_projections", { league_id: first.league_id, username }, (d) => `current ${d.current_projected_total} vs optimal ${d.optimal_projected_total}`);
+      await call("get_matchup_odds", { league_id: first.league_id, username }, (d) => {
+        const m = (d.matchups as { teams: { team_name: string; win_pct?: number }[] }[])[0];
+        return m ? m.teams.map((t) => `${t.team_name} ${t.win_pct ?? "-"}%`).join(" vs ") : String(d.note ?? "no matchup");
+      });
+      await call("get_playoff_odds", { league_id: first.league_id, username }, (d) => {
+        const focus = d.focus as { playoff_pct: number } | undefined;
+        return focus ? `${focus.playoff_pct}% to make the playoffs (weeks ${d.weeks_simulated})` : String(d.note ?? d.status);
+      });
     }
   }
 
