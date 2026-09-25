@@ -32,6 +32,11 @@ const UPCOMING: TeamGame = { state: "yet_to_play", remaining: 1 };
 const BYE: TeamGame = { state: "bye", remaining: 0 };
 const NO_GAME: TeamGame = { state: "no_game", remaining: 0 };
 
+/** Sleeper locks a player once his game kicks off (final or still being played). */
+export function hasKickedOff(game: TeamGame): boolean {
+  return game.state === "final" || game.state === "playing";
+}
+
 /** The whole week has been played: an earlier season, or an earlier week of the current season. */
 export function weekIsOver(season: string, week: number, state: NflState): boolean {
   if (Number(season) < Number(state.season)) return true;
