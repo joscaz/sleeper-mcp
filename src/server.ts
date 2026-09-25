@@ -8,6 +8,7 @@ import { registerTransactionTools } from "./tools/transactions.js";
 import { registerDraftTools } from "./tools/drafts.js";
 import { registerPlayerTools } from "./tools/players.js";
 import { registerStatTools } from "./tools/stats.js";
+import { registerOddsTools } from "./tools/odds.js";
 import { registerAccountTools } from "./tools/account.js";
 
 const require = createRequire(import.meta.url);
@@ -22,6 +23,7 @@ Typical flow:
 1. get_user / get_user_leagues to turn a username into league_ids.
 2. get_league (settings) and get_league_standings (records + roster_id ↔ manager map).
 3. get_roster / get_matchups / get_transactions / get_free_agents / get_lineup_projections for the actual questions.
+4. get_matchup_odds ("am I going to win this week?", live during games) and get_playoff_odds ("will I make the playoffs?", "what do I need?").
 
 Notes:
 - Player ids are resolved to {id, name, pos, team, inj} everywhere; team defenses use team codes (e.g. "DET").
@@ -52,6 +54,7 @@ export function createServer(options: CreateServerOptions = {}): { server: McpSe
   registerDraftTools(server, ctx);
   registerPlayerTools(server, ctx);
   registerStatTools(server, ctx);
+  registerOddsTools(server, ctx);
   registerAccountTools(server, ctx);
   registerPrompts(server);
   registerResources(server, ctx);
@@ -85,8 +88,8 @@ function registerPrompts(server: McpServer): void {
               `Prepare a concise weekly fantasy football briefing for Sleeper user "${username}" in league ${league_id}${week ? ` for week ${week}` : ""}.`,
               "",
               "Steps:",
-              "1. get_league for scoring/roster format, get_league_standings for records and playoff picture.",
-              `2. get_matchups for ${username}'s matchup: opponent, projected/actual score, key players on both sides.`,
+              "1. get_league for scoring/roster format, get_league_standings for records, get_playoff_odds for the playoff picture.",
+              `2. get_matchup_odds for ${username}'s matchup: opponent, score and projected final, win probability, key players on both sides.`,
               `3. get_lineup_projections for ${username}: flag empty slots, injured/bye starters, and better bench options.`,
               "4. get_free_agents (top few at the weakest positions) and get_trending_players to suggest waiver targets.",
               "5. get_transactions (this week) for notable league moves and trades.",
