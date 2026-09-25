@@ -322,6 +322,12 @@ export const schedule2026: ScheduleGame[] = [
   { game_id: "202660001", week: 6, date: "2026-10-18", home: "IND", away: "KC", status: "pre_game" },
 ];
 
+/** The same season before week 5 kicks off, with IND playing too: every week-5 game still to come. */
+export const preKickoffSchedule2026: ScheduleGame[] = [
+  ...schedule2026.map((g) => (g.week === 5 && g.status !== "canceled" ? { ...g, status: "pre_game" } : g)),
+  { game_id: "202650006", week: 5, date: "2026-10-11", home: "IND", away: "HOU", status: "pre_game" },
+];
+
 /** Alice vs Bob in week 5 while those games are on: KC players final, ATL/NYJ live, CIN/MIN/DET to come. */
 export const liveMatchupsWeek5: Matchup[] = [
   {

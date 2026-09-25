@@ -165,7 +165,7 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 | --- | --- |
 | `get_projections` | Weekly or season (`week=0`) projections. Filter by players/position/league/team. `scoring="league"` applies the league's exact `scoring_settings`. |
 | `get_player_stats` | Actual weekly/season fantasy production with the same filters and scoring options. |
-| `get_lineup_projections` | Start/sit for one team: current vs optimal lineup (respecting FLEX/SUPER_FLEX/IDP eligibility), suggested swaps, bye/injury/empty-slot warnings. |
+| `get_lineup_projections` | Start/sit for one team: current vs optimal lineup (respecting FLEX/SUPER_FLEX/IDP eligibility), suggested swaps, bye/injury/empty-slot warnings. Once games kick off, players whose game has started stay locked and count the points they have scored (plus a projection for the rest of a live game), so totals are projected finals and swaps only involve players still to play. |
 
 ### Odds & simulations
 
