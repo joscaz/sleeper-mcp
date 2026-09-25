@@ -11,6 +11,7 @@ import type {
   NflState,
   PlayerMap,
   Roster,
+  ScheduleGame,
   SleeperUser,
   StatMap,
   TradedPick,
@@ -308,6 +309,38 @@ export const statsWeek4: StatMap = {
   "9226": { pts_ppr: 22.3, pts_half_ppr: 20.3, pts_std: 18.3, rush_yd: 103, rush_td: 1, rec: 4, rec_yd: 40, gp: 1 },
 };
 
+/** The schedule lives outside /v1, so its route key is the absolute URL. */
+export const SCHEDULE_URL = "https://api.sleeper.app/schedule/nfl/regular/2026";
+
+/** Week 5 mid-Sunday: KC-BUF final, ATL-NYJ live, CIN-MIN and DET-SF still to play, IND on bye, one canceled listing. */
+export const schedule2026: ScheduleGame[] = [
+  { game_id: "202650001", week: 5, date: "2026-10-08", home: "KC", away: "BUF", status: "complete" },
+  { game_id: "202650002", week: 5, date: "2026-10-11", home: "ATL", away: "NYJ", status: "in_game" },
+  { game_id: "202650003", week: 5, date: "2026-10-11", home: "CIN", away: "MIN", status: "pre_game" },
+  { game_id: "202650004", week: 5, date: "2026-10-11", home: "DET", away: "SF", status: "pre_game" },
+  { game_id: "202650005", week: 5, date: "2026-10-11", home: "LAR", away: "SEA", status: "canceled" },
+  { game_id: "202660001", week: 6, date: "2026-10-18", home: "IND", away: "KC", status: "pre_game" },
+];
+
+/** Alice vs Bob in week 5 while those games are on: KC players final, ATL/NYJ live, CIN/MIN/DET to come. */
+export const liveMatchupsWeek5: Matchup[] = [
+  {
+    roster_id: 1,
+    matchup_id: 1,
+    points: 54.1,
+    custom_points: null,
+    starters: rosters[0]!.starters,
+    players: rosters[0]!.players,
+    players_points: { "4046": 24.1, "9226": 10, "8138": 6, "7564": 0, "6794": 0, "5850": 0, "8112": 5, "4195": 9, DET: 0, "6813": 0, "9509": 0 },
+  },
+  { roster_id: 2, matchup_id: 1, points: 29.2, custom_points: null, starters: rosters[1]!.starters, players: rosters[1]!.players, players_points: { "4984": 29.2, SF: 0 } },
+  { roster_id: 3, matchup_id: 2, points: 0, custom_points: null, starters: [], players: [], players_points: {} },
+  { roster_id: 4, matchup_id: 2, points: 0, custom_points: null, starters: [], players: [], players_points: {} },
+];
+
+/** Box scores while ATL-NYJ is live: ATL has run 48 of a typical 64 offensive snaps; NYJ has no stat lines yet. */
+export const liveStatsWeek5: StatMap = { "9226": { rush_att: 9, rush_yd: 50, tm_off_snp: 48 } };
+
 /** Route table: path (without base) -> body. Query strings are matched exactly where present. */
 export function routes(): Record<string, unknown> {
   return {
@@ -351,5 +384,6 @@ export function routes(): Record<string, unknown> {
     "/projections/nfl/regular/2026": projectionsWeek5,
     "/stats/nfl/regular/2026/4": statsWeek4,
     "/stats/nfl/regular/2026/5": {},
+    [SCHEDULE_URL]: schedule2026,
   };
 }

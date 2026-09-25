@@ -9,6 +9,7 @@ import type {
   NflState,
   PlayerMap,
   Roster,
+  ScheduleGame,
   SleeperUser,
   Sport,
   StatMap,
@@ -69,7 +70,11 @@ export const TTL = {
   players: 24 * 60 * 60_000,
   trending: 5 * 60_000,
   stats: 5 * 60_000,
+  /** Box scores for a week with games in progress (used to estimate how far along each game is). */
+  liveStats: 60_000,
   projections: 30 * 60_000,
+  /** Game statuses flip between pre_game, in_game and complete on game days. */
+  schedule: 60_000,
 } as const;
 
 interface GetOptions {
@@ -85,6 +90,8 @@ interface GetOptions {
  */
 export class SleeperClient {
   readonly baseUrl: string;
+  /** baseUrl without the /v1 suffix: a few undocumented endpoints (the NFL schedule) live outside /v1. */
+  readonly origin: string;
   readonly cache: TtlCache;
   private readonly fetchImpl: typeof fetch;
   private readonly userAgent: string;
@@ -98,6 +105,7 @@ export class SleeperClient {
 
   constructor(options: SleeperClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? SLEEPER_API_BASE).replace(/\/$/, "");
+    this.origin = this.baseUrl.replace(/\/v\d+$/, "");
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.cache = options.cache ?? new TtlCache();
     this.userAgent = options.userAgent ?? "sleeper-mcp (+https://github.com/joscaz/sleeper-mcp)";
@@ -134,8 +142,9 @@ export class SleeperClient {
     }
   }
 
+  /** `path` is relative to baseUrl, or an absolute URL for endpoints outside it. */
   private async rawGet(path: string): Promise<{ status: number; body: unknown }> {
-    const url = `${this.baseUrl}${path}`;
+    const url = /^https?:\/\//i.test(path) ? path : `${this.baseUrl}${path}`;
     let attempt = 0;
     for (;;) {
       await this.throttle();
@@ -303,9 +312,15 @@ export class SleeperClient {
   // ---------------------------------------------------------------------------
 
   /** Weekly (or season, when week is omitted) stat lines keyed by player_id. */
-  async getStats(sport: Sport, seasonType: string, season: string, week?: number): Promise<StatMap> {
+  async getStats(sport: Sport, seasonType: string, season: string, week?: number, options: { ttlMs?: number } = {}): Promise<StatMap> {
     const path = week === undefined ? `/stats/${sport}/${seasonType}/${enc(season)}` : `/stats/${sport}/${seasonType}/${enc(season)}/${week}`;
-    return (await this.get<StatMap>(path, { ttlMs: TTL.stats, nullable: true })) ?? {};
+    return (await this.get<StatMap>(path, { ttlMs: options.ttlMs ?? TTL.stats, nullable: true })) ?? {};
+  }
+
+  /** Every NFL game of a season with its week, teams and live status (pre_game / in_game / complete). */
+  async getSchedule(sport: Sport, seasonType: string, season: string): Promise<ScheduleGame[]> {
+    const url = `${this.origin}/schedule/${sport}/${seasonType}/${enc(season)}`;
+    return (await this.get<ScheduleGame[]>(url, { ttlMs: TTL.schedule, nullable: true })) ?? [];
   }
 
   /** Weekly (or season, when week is omitted) projections keyed by player_id. */

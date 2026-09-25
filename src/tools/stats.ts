@@ -166,25 +166,16 @@ export function fantasyPoints(line: StatLine, scoring: "ppr" | "half_ppr" | "std
 
 /**
  * Greedy-but-correct optimal lineup: fill the most restrictive slots first, then flex slots,
- * always choosing the highest projected eligible player.
+ * always choosing the highest projected eligible player. Returns player ids aligned with the
+ * league's starting slots (null where nobody eligible is left).
  */
-export function lineupAnalysis(
+export function optimalStarters(
   ctx: ServerContext,
-  bundle: LeagueBundle,
-  rosterId: number,
-  playerIds: string[],
-  currentStarters: string[],
-  projections: StatMap,
-  week: number,
-) {
-  const league = bundle.league;
-  const scoring = league.scoring_settings;
+  league: Pick<League, "roster_positions">,
+  candidates: Iterable<string>,
+  projected: Map<string, number>,
+): (string | null)[] {
   const slots = startingSlots(league);
-  const team = bundle.teams.get(rosterId);
-
-  const projected = new Map<string, number>();
-  for (const id of playerIds) projected.set(id, scoreStatLine(projections[id] ?? null, scoring));
-
   const eligible = (playerId: string, slot: string): boolean => {
     const p = ctx.players.raw(playerId);
     const positions = p?.fantasy_positions ?? (p?.position ? [p.position] : isTeamDefense(playerId) ? ["DEF"] : []);
@@ -194,7 +185,7 @@ export function lineupAnalysis(
 
   // Order slots by how many positions they accept (specific first), keep original index for output.
   const slotOrder = slots.map((slot, index) => ({ slot, index, breadth: (SLOT_ELIGIBILITY[slot] ?? [slot]).length })).sort((a, b) => a.breadth - b.breadth);
-  const available = new Set(playerIds.filter((id) => !(bundle.rosters.find((r) => r.roster_id === rosterId)?.reserve ?? []).includes(id)));
+  const available = new Set(candidates);
   const optimal: (string | null)[] = new Array(slots.length).fill(null);
   for (const { slot, index } of slotOrder) {
     let best: string | null = null;
@@ -212,6 +203,34 @@ export function lineupAnalysis(
       available.delete(best);
     }
   }
+  return optimal;
+}
+
+/** Current vs optimal projected lineup for one roster, with suggested swaps and warnings. */
+export function lineupAnalysis(
+  ctx: ServerContext,
+  bundle: LeagueBundle,
+  rosterId: number,
+  playerIds: string[],
+  currentStarters: string[],
+  projections: StatMap,
+  week: number,
+) {
+  const league = bundle.league;
+  const scoring = league.scoring_settings;
+  const slots = startingSlots(league);
+  const team = bundle.teams.get(rosterId);
+
+  const projected = new Map<string, number>();
+  for (const id of playerIds) projected.set(id, scoreStatLine(projections[id] ?? null, scoring));
+
+  const reserve = bundle.rosters.find((r) => r.roster_id === rosterId)?.reserve ?? [];
+  const optimal = optimalStarters(
+    ctx,
+    league,
+    playerIds.filter((id) => !reserve.includes(id)),
+    projected,
+  );
 
   const describe = (id: string | null, slot: string): SlotPlayer => {
     if (!id || id === "0") return { id: "0", name: "(empty)", pos: null, team: null, slot, pts: 0 };
