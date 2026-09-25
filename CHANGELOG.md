@@ -13,6 +13,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Team selectors accept `team`: a username, display name or (partial) team name in one field. A caller that guessed `team` used to be silently answered with the default user's roster.
 - `get_pending_transactions` searches the current and previous week by default: Sleeper keeps open claims and trade offers filed under the week they were created in, so right after the weekly rollover the queued claims were invisible.
 - HTTP mode refuses to start when a Sleeper session with write tools enabled would listen on a non-loopback address without `SLEEPER_MCP_AUTH_TOKEN`. `SLEEPER_MCP_INSECURE_NO_AUTH=1` overrides for deployments that authenticate in front of the server.
+- `get_matchup_odds`: win probability for a week's matchups, live during games. Points so far plus league-scored projections for the share of each starter's game still to play (game status from Sleeper's NFL schedule, live progress from team offensive snaps), with a starter-by-starter view for one team.
+- `get_playoff_odds`: seeded Monte Carlo simulation of the rest of the regular season over the league's real schedule, using each team's best projected lineup under league scoring, live points for the week in progress, first-round byes and median games. Returns playoff, bye and #1-seed odds, projected records and average seeds, plus, for one team, the swing from this week's result and playoff odds by final win total.
 
 ### Changed
 

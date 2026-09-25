@@ -1,6 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connectedClient } from "./helpers.js";
-import { LEAGUE_ID, PREV_LEAGUE_ID, DRAFT_ID } from "./fixtures.js";
+import {
+  DRAFT_ID,
+  LEAGUE_ID,
+  PREV_LEAGUE_ID,
+  SCHEDULE_URL,
+  league,
+  liveMatchupsWeek5,
+  liveStatsWeek5,
+  matchupsWeek5,
+  projectionsWeek5,
+} from "./fixtures.js";
 
 type Connected = Awaited<ReturnType<typeof connectedClient>>;
 let c: Connected;
@@ -27,11 +37,13 @@ describe("server surface", () => {
         "get_league_rosters",
         "get_league_standings",
         "get_lineup_projections",
+        "get_matchup_odds",
         "get_matchups",
         "get_nfl_state",
         "get_player",
         "get_player_stats",
         "get_playoff_bracket",
+        "get_playoff_odds",
         "get_projections",
         "get_roster",
         "get_traded_picks",
@@ -367,6 +379,146 @@ describe("projections & stats", () => {
   it("get_lineup_projections warns about empty slots", async () => {
     const { data } = await c.call("get_lineup_projections", { league_id: LEAGUE_ID, roster_id: 2 });
     expect((data!.warnings as string[]).filter((w) => w.startsWith("Empty")).length).toBe(7);
+  });
+});
+
+describe("odds", () => {
+  const live = { [`/league/${LEAGUE_ID}/matchups/5`]: liveMatchupsWeek5, "/stats/nfl/regular/2026/5": liveStatsWeek5 };
+  type Starter = { id: string; name: string; status: string; pts: number; proj_left: number };
+  type Side = { roster_id: number; team_name: string; points: number; projected: number; win_pct: number; starters_left: number; starters?: Starter[] };
+  type OddsMatchup = { matchup_id: number; status: string; teams: Side[]; favorite?: string | null; winner?: string };
+
+  it("get_matchup_odds combines live points with projections for the time each starter has left", async () => {
+    const o = await connectedClient(live);
+    try {
+      const all = await o.call("get_matchup_odds", { league_id: LEAGUE_ID });
+      expect(all.data!.game_status_source).toBe("schedule");
+      const [m1, m2] = all.data!.matchups as OddsMatchup[];
+      expect(m1!.status).toBe("in_progress");
+      expect(m1!.favorite).toBe("Alice's Avengers");
+      expect(m1!.teams[0]!.starters).toBeUndefined();
+      expect(m1!.teams[0]!.win_pct + m1!.teams[1]!.win_pct).toBeCloseTo(100, 5);
+      expect(m1!.teams[0]!.win_pct).toBeGreaterThan(99);
+      expect(m2!.status).toBe("no_lineups");
+      expect(m2!.teams.map((t) => t.win_pct)).toEqual([50, 50]);
+
+      const mine = await o.call("get_matchup_odds", { league_id: LEAGUE_ID, username: "alice" });
+      const side = (mine.data!.matchups as OddsMatchup[])[0]!.teams[0]!;
+      expect(side).toMatchObject({ team_name: "Alice's Avengers", points: 54.1, starters_left: 6 });
+      expect(side.projected).toBeCloseTo(108.45, 0);
+      const byName = new Map(side.starters!.map((s) => [s.name, s]));
+      expect(byName.get("Patrick Mahomes")).toMatchObject({ status: "final", pts: 24.1, proj_left: 0 });
+      // Projected 20.8 under league scoring; ATL has run 48 of ~64 snaps, so a quarter of that is left.
+      expect(byName.get("Bijan Robinson")).toMatchObject({ status: "playing", pts: 10, proj_left: 5.2 });
+      // No NYJ box score yet: a live game with unknown progress counts as halfway.
+      expect(byName.get("Breece Hall")).toMatchObject({ status: "playing", proj_left: 6.7 });
+      expect(byName.get("Ja'Marr Chase")).toMatchObject({ status: "yet_to_play", pts: 0, proj_left: 19.7 });
+      expect(byName.get("Travis Kelce")).toMatchObject({ status: "final", pts: 0, proj_left: 0 });
+
+      const theirs = await o.call("get_matchup_odds", { league_id: LEAGUE_ID, team: "bob" });
+      expect((theirs.data!.matchups as OddsMatchup[])[0]!.teams[0]!.roster_id).toBe(2);
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("get_matchup_odds reports past weeks as results without fetching projections", async () => {
+    const o = await connectedClient({ [`/league/${LEAGUE_ID}/matchups/4`]: matchupsWeek5 });
+    try {
+      const past = await o.call("get_matchup_odds", { league_id: LEAGUE_ID, week: 4 });
+      expect(past.data!.game_status_source).toBe("past_week");
+      const [m1, m2] = past.data!.matchups as OddsMatchup[];
+      expect(m1).toMatchObject({ status: "final", winner: "Alice's Avengers" });
+      expect(m1!.teams.map((t) => t.win_pct)).toEqual([100, 0]);
+      expect(m2!.winner).toBe("Dave Nation");
+      expect(o.ff.calls.some((path) => path.startsWith("/projections/"))).toBe(false);
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("get_matchup_odds falls back to box scores when the schedule is unavailable", async () => {
+    const o = await connectedClient({ ...live, [SCHEDULE_URL]: () => ({ status: 500 }) });
+    try {
+      const res = await o.call("get_matchup_odds", { league_id: LEAGUE_ID, username: "alice" });
+      expect(res.data!.game_status_source).toBe("box_scores");
+      const starters = (res.data!.matchups as OddsMatchup[])[0]!.teams[0]!.starters!;
+      expect(starters.find((s) => s.name === "Bijan Robinson")).toMatchObject({ status: "playing", proj_left: 5.2 });
+      expect(starters.find((s) => s.name === "Ja'Marr Chase")?.status).toBe("yet_to_play");
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("get_playoff_odds simulates the rest of the regular season over the real schedule", async () => {
+    // Weeks 6-14: a rotating schedule, except week 13 (no pairings yet) and week 14 (no projections yet).
+    const future: Record<string, unknown> = {};
+    const rotation = [
+      [1, 3, 2, 4],
+      [1, 4, 2, 3],
+      [1, 2, 3, 4],
+    ];
+    for (let week = 6; week <= 14; week++) {
+      const order = rotation[week % 3]!;
+      future[`/league/${LEAGUE_ID}/matchups/${week}`] = order.map((roster_id, i) => ({
+        roster_id,
+        matchup_id: week === 13 ? null : i < 2 ? 1 : 2,
+        points: 0,
+        custom_points: null,
+        starters: [],
+        players: [],
+        players_points: {},
+      }));
+      if (week !== 14) future[`/projections/nfl/regular/2026/${week}`] = projectionsWeek5;
+    }
+    const o = await connectedClient({ ...live, ...future });
+    try {
+      const res = await o.call("get_playoff_odds", { league_id: LEAGUE_ID, username: "alice" });
+      const d = res.data!;
+      expect(d).toMatchObject({ weeks_simulated: "5-14", simulations: 10000, playoff_teams: 2 });
+      expect(d.first_round_byes).toBeUndefined();
+      const teams = d.teams as { roster_id: number; playoff_pct: number; top_seed_pct: number }[];
+      expect(teams.slice(0, 2).map((t) => t.roster_id).sort()).toEqual([1, 2]);
+      expect(teams.reduce((sum, t) => sum + t.playoff_pct, 0)).toBeCloseTo(200, 0);
+      expect(teams.find((t) => t.roster_id === 1)).toMatchObject({ playoff_pct: 100, top_seed_pct: 100 });
+      expect(teams.find((t) => t.roster_id === 4)!.playoff_pct).toBe(0);
+
+      const focus = d.focus as { team_name: string; this_week: { week: number; opponent: string; win_pct: number }; by_final_wins: unknown[] };
+      expect(focus.team_name).toBe("Alice's Avengers");
+      expect(focus.this_week.week).toBe(5);
+      expect(focus.this_week.opponent).toContain("Bobby Tables");
+      expect(focus.this_week.win_pct).toBeGreaterThan(99);
+      expect(focus.by_final_wins.length).toBeGreaterThan(0);
+
+      const notes = (d.notes as string[]).join(" ");
+      expect(notes).toContain("divisions");
+      expect(notes).toContain("week(s) 13"); // opponents drawn at random
+      expect(notes).toContain("week(s) 14"); // nearest week's projections
+
+      const leagueWide = await o.call("get_playoff_odds", { league_id: LEAGUE_ID });
+      expect(leagueWide.data!.focus).toBeUndefined();
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("get_playoff_odds explains when there is nothing to simulate", async () => {
+    const over = await connectedClient({ [`/league/${LEAGUE_ID}`]: { ...league, settings: { ...league.settings, last_scored_leg: 14 } } });
+    try {
+      const res = await over.call("get_playoff_odds", { league_id: LEAGUE_ID });
+      expect(res.data).toMatchObject({ status: "regular_season_over" });
+      expect((res.data!.seeds as { team_name: string }[]).map((s) => s.team_name)).toEqual(["Team Bobby Tables", "Alice's Avengers"]);
+    } finally {
+      await over.close();
+    }
+    const early = await connectedClient({ [`/league/${LEAGUE_ID}`]: { ...league, status: "pre_draft" } });
+    try {
+      const res = await early.call("get_playoff_odds", { league_id: LEAGUE_ID });
+      expect(res.result.isError).toBe(true);
+      expect(res.text).toContain("draft");
+    } finally {
+      await early.close();
+    }
   });
 });
 
