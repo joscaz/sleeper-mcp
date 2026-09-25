@@ -1,10 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { loadLeague, ToolError, type ServerContext } from "../context.js";
+import { loadLeague, ToolError, type LeagueBundle, type ServerContext } from "../context.js";
 import { playerHeadshotUrl } from "../sleeper/client.js";
 import { isActive, isTeamDefense, playerFullName } from "../sleeper/players.js";
-import type { Player } from "../sleeper/types.js";
-import { isoDate } from "../format.js";
+import type { NflState, Player } from "../sleeper/types.js";
+import { isoDate, num } from "../format.js";
+import { hasKickedOff, loadWeekGames, nflTeam } from "../games.js";
 import { guard, leagueIdSchema, positionSchema, sportSchema } from "./shared.js";
 
 export function registerPlayerTools(server: McpServer, ctx: ServerContext): void {
@@ -93,18 +94,28 @@ export function registerPlayerTools(server: McpServer, ctx: ServerContext): void
     {
       title: "Available free agents",
       description:
-        "Players NOT on any roster in a league (the waiver wire / free-agent pool), ranked by Sleeper's overall player rank and annotated with platform-wide trending adds. Filter by position; great for waiver and streaming questions.",
+        "Players NOT on any roster in a league (the waiver wire / free-agent pool), ranked by Sleeper's overall player rank and annotated with platform-wide trending adds. During the season, players who can't be picked up right now carry availability: 'locked' (his NFL game this week has already kicked off) or 'on_waivers' (dropped in this league within its waiver period, with dropped_at, so adding him takes a waiver claim); addable_only=true hides them. Filter by position; great for waiver and streaming questions.",
       inputSchema: {
         league_id: leagueIdSchema,
         position: positionSchema,
         limit: z.number().int().min(1).max(100).default(25),
         include_injured: z.boolean().default(true).describe("Include players with an injury designation (default true, flagged with inj)."),
+        addable_only: z
+          .boolean()
+          .default(false)
+          .describe("Hide players who can't be picked up right now: locked because their game this week has kicked off, or still on waivers after a recent drop."),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ league_id, position, limit, include_injured }) =>
+    async ({ league_id, position, limit, include_injured, addable_only }) =>
       guard(async () => {
-        const [bundle, trending] = await Promise.all([loadLeague(ctx, league_id), ctx.client.getTrendingPlayers("nfl", "add", 24, 100), ctx.players.ensureLoaded()]);
+        const [bundle, trending, state] = await Promise.all([
+          loadLeague(ctx, league_id),
+          ctx.client.getTrendingPlayers("nfl", "add", 24, 100),
+          ctx.client.getNflState("nfl"),
+          ctx.players.ensureLoaded(),
+        ]);
+        const availability = await loadAvailability(ctx, bundle, state);
         const rostered = new Set<string>();
         for (const r of bundle.rosters) for (const id of r.players ?? []) rostered.add(id);
         const trendingCounts = new Map(trending.map((t) => [t.player_id, t.count]));
@@ -119,23 +130,87 @@ export function registerPlayerTools(server: McpServer, ctx: ServerContext): void
             return positions.some((pos) => leaguePositions.has(pos));
           })
           .filter((p) => include_injured || !p.injury_status)
+          .filter((p) => !addable_only || !availability.of(p))
           .sort((a, b) => rank(a) - rank(b))
           .slice(0, limit);
 
+        const freeAgents = pool.map((p) => {
+          const card = playerCard(p);
+          const adds = trendingCounts.get(p.player_id);
+          if (adds) card.trending_adds_24h = adds;
+          const flag = availability.of(p);
+          return flag ? { ...card, ...flag } : card;
+        });
+        const flagged = freeAgents.some((f) => "availability" in f);
         return {
           league_id: bundle.league.league_id,
           league: bundle.league.name,
           position: position ?? "all",
+          ...(availability.week !== null ? { week: availability.week } : {}),
           rostered_players: rostered.size,
           count: pool.length,
-          free_agents: pool.map((p) => {
-            const card = playerCard(p);
-            const adds = trendingCounts.get(p.player_id);
-            return adds ? { ...card, trending_adds_24h: adds } : card;
-          }),
+          free_agents: freeAgents,
+          ...(flagged
+            ? {
+                note: `availability "locked": his game this week has already kicked off, so he can't be added in time to play. "on_waivers": dropped in this league in the last ${availability.waiverDays} day(s), so adding him takes a waiver claim.`,
+              }
+            : {}),
         };
       }),
   );
+}
+
+type Availability = { availability: "locked" } | { availability: "on_waivers"; dropped_at: string | null };
+
+interface AvailabilityIndex {
+  /** Why a free agent can't be picked up right now, or null when nothing stops it. */
+  of: (p: Player) => Availability | null;
+  /** The week whose games were checked (null outside the regular season). */
+  week: number | null;
+  /** How long a dropped player stays on waivers in this league. */
+  waiverDays: number;
+}
+
+/** Sleeper's default waiver period for a dropped player, when a league does not say. */
+const DEFAULT_WAIVER_CLEAR_DAYS = 2;
+
+/**
+ * During the regular season, free agents Sleeper won't let you add right now: players whose NFL game this
+ * week has kicked off (locked at kickoff) and players dropped in this league within its waiver period.
+ * Drops come from this week's and last week's transactions, since the waiver period can straddle the rollover.
+ */
+async function loadAvailability(ctx: ServerContext, bundle: LeagueBundle, state: NflState): Promise<AvailabilityIndex> {
+  const league = bundle.league;
+  const settings = league.settings ?? {};
+  const waiverDays = typeof settings.waiver_clear_days === "number" ? settings.waiver_clear_days : DEFAULT_WAIVER_CLEAR_DAYS;
+  if (league.status !== "in_season" || league.season !== state.season || state.season_type !== "regular") {
+    return { of: () => null, week: null, waiverDays };
+  }
+
+  const week = Math.max(1, state.week || 1);
+  const leg = num(settings.leg) || week;
+  const [games, lists] = await Promise.all([
+    loadWeekGames(ctx, league.season, week, state),
+    waiverDays > 0 ? Promise.all([leg, leg - 1].filter((w) => w >= 1).map((w) => ctx.client.getTransactions(league.league_id, w))) : Promise.resolve([]),
+  ]);
+  const lastDrop = new Map<string, number>();
+  for (const t of lists.flat()) {
+    if (t.status !== "complete" || !t.drops) continue;
+    const at = t.status_updated ?? t.created;
+    for (const id of Object.keys(t.drops)) if (at > (lastDrop.get(id) ?? 0)) lastDrop.set(id, at);
+  }
+  const waiverCutoff = Date.now() - waiverDays * 24 * 60 * 60_000;
+
+  return {
+    week,
+    waiverDays,
+    of: (p) => {
+      if (hasKickedOff(games.game(nflTeam(ctx, p.player_id)))) return { availability: "locked" };
+      const dropped = lastDrop.get(p.player_id);
+      if (dropped !== undefined && dropped > waiverCutoff) return { availability: "on_waivers", dropped_at: isoDate(dropped) };
+      return null;
+    },
+  };
 }
 
 const SLOT_POSITIONS: Record<string, string[]> = {

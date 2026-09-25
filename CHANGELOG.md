@@ -23,6 +23,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Fixed
 
 - `get_lineup_projections` counts the points a player has already scored once his game kicks off (plus a projection for the rest of a live game) and keeps him locked in his slot, as Sleeper does. It used to score everyone with their pre-game projection all week, so after Thursday night the totals ignored what had already happened, and it could suggest benching a starter whose game was over or starting a bench player who had already played. Starters on bye now get an explicit "is on bye" warning when the schedule shows it.
+- `get_free_agents` flags players who can't be picked up right now: `availability: "locked"` once their NFL game this week has kicked off, and `availability: "on_waivers"` (with `dropped_at`) for players dropped in the league within its waiver period (`waiver_clear_days`, default 2). `addable_only=true` hides both. The list used to present them as available, including a player who had already played on Thursday night or one dropped an hour earlier.
 
 ## [0.1.0] - 2026-09-11
 
