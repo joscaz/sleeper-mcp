@@ -157,7 +157,7 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 | `search_players` | Name search (handles "ja marr", "lions") with position/team filters, injury and depth-chart info. |
 | `get_player` | Full profile: injury details, practice participation, depth chart, measurables, external IDs, headshot URL. |
 | `get_trending_players` | Most added/dropped players platform-wide over the last N hours. |
-| `get_free_agents` | Unrostered players in a league ranked by Sleeper's player rank, annotated with 24h trending adds. |
+| `get_free_agents` | Unrostered players in a league ranked by Sleeper's player rank, annotated with 24h trending adds. In season, flags players who can't be picked up right now (`availability`: `locked` once their game has kicked off, `on_waivers` after a recent drop); `addable_only` hides them. |
 
 ### Projections & stats
 

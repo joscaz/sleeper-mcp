@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Transaction } from "../src/sleeper/types.js";
 import { connectedClient } from "./helpers.js";
 import {
   DRAFT_ID,
@@ -12,6 +13,8 @@ import {
   preKickoffSchedule2026,
   projectionsWeek5,
   rosters,
+  schedule2026,
+  transactionsWeek5,
 } from "./fixtures.js";
 
 type Connected = Awaited<ReturnType<typeof connectedClient>>;
@@ -328,6 +331,51 @@ describe("players", () => {
     expect(fas[1]).toMatchObject({ trending_adds_24h: 12345 });
     const rbs = await c.call("get_free_agents", { league_id: LEAGUE_ID, position: "RB", include_injured: false });
     expect((rbs.data!.free_agents as Record<string, unknown>[]).map((f) => f.name)).toEqual(["Rookie Runner", "Handcuff Harry"]);
+    // Nobody here is locked or recently dropped, so nothing is flagged.
+    expect(fas.some((f) => "availability" in f)).toBe(false);
+    expect(data!.note).toBeUndefined();
+  });
+
+  it("get_free_agents flags players who are locked or still on waivers", async () => {
+    const hour = 60 * 60_000;
+    const drop = (playerId: string, at: number): Transaction => ({
+      transaction_id: `drop-${playerId}`,
+      type: "free_agent",
+      status: "complete",
+      status_updated: at,
+      created: at,
+      creator: "444",
+      leg: 5,
+      roster_ids: [4],
+      consenter_ids: [4],
+      adds: null,
+      drops: { [playerId]: 4 },
+      draft_picks: [],
+      waiver_budget: [],
+      settings: null,
+      metadata: null,
+    });
+    const droppedAt = Date.now() - hour;
+    const o = await connectedClient({
+      // GB and PHI played on Thursday night; Steve was dropped an hour ago, Ian three days ago (past the 2-day waiver period).
+      [SCHEDULE_URL]: [...schedule2026, { game_id: "202650007", week: 5, date: "2026-10-08", home: "PHI", away: "GB", status: "complete" }],
+      [`/league/${LEAGUE_ID}/transactions/5`]: [...transactionsWeek5, drop("11002", droppedAt), drop("11003", Date.now() - 72 * hour)],
+    });
+    try {
+      const { data } = await o.call("get_free_agents", { league_id: LEAGUE_ID });
+      expect(data!.week).toBe(5);
+      const byName = new Map((data!.free_agents as Record<string, unknown>[]).map((f) => [f.name, f]));
+      expect(byName.get("Rookie Runner")).toMatchObject({ availability: "locked" });
+      expect(byName.get("Handcuff Harry")).toMatchObject({ availability: "locked" });
+      expect(byName.get("Streamer Steve")).toMatchObject({ availability: "on_waivers", dropped_at: new Date(droppedAt).toISOString() });
+      expect(byName.get("Injured Ian")).not.toHaveProperty("availability");
+      expect(data!.note).toMatch(/last 2 day\(s\)/);
+
+      const addable = await o.call("get_free_agents", { league_id: LEAGUE_ID, addable_only: true });
+      expect((addable.data!.free_agents as Record<string, unknown>[]).map((f) => f.name)).toEqual(["Injured Ian"]);
+    } finally {
+      await o.close();
+    }
   });
 });
 

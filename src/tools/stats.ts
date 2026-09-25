@@ -5,7 +5,7 @@ import { TTL } from "../sleeper/client.js";
 import { isTeamDefense } from "../sleeper/players.js";
 import type { League, NflState, Roster, StatLine, StatMap } from "../sleeper/types.js";
 import { keyStats, num, round, scoreStatLine, SLOT_ELIGIBILITY, startingSlots } from "../format.js";
-import { loadWeekGames, nflTeam, type GameState, type TeamGame, type WeekGames } from "../games.js";
+import { hasKickedOff, loadWeekGames, nflTeam, type GameState, type TeamGame, type WeekGames } from "../games.js";
 import { guard, leagueIdSchema, positionSchema, seasonSchema, teamSelectorShape, weekSchema } from "./shared.js";
 import type { SlotPlayer } from "./rosters.js";
 
@@ -92,10 +92,6 @@ export interface LiveWeek {
   games: WeekGames;
   /** Points scored so far under the league's scoring, for players whose game has kicked off. */
   scored: Map<string, number>;
-}
-
-function hasKickedOff(game: TeamGame): boolean {
-  return game.state === "final" || game.state === "playing";
 }
 
 async function loadLiveWeek(ctx: ServerContext, bundle: LeagueBundle, roster: Roster, week: number, state: NflState): Promise<LiveWeek> {
