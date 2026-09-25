@@ -20,6 +20,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - The README leads with `npx -y @joscaz/sleeper-mcp` for every client, keeps a source checkout as the alternative, and no longer says every tool is read-only now that the optional account tools exist. The npm package description mentions the account tools too.
 
+### Fixed
+
+- `get_lineup_projections` counts the points a player has already scored once his game kicks off (plus a projection for the rest of a live game) and keeps him locked in his slot, as Sleeper does. It used to score everyone with their pre-game projection all week, so after Thursday night the totals ignored what had already happened, and it could suggest benching a starter whose game was over or starting a bench player who had already played. Starters on bye now get an explicit "is on bye" warning when the schedule shows it.
+
 ## [0.1.0] - 2026-09-11
 
 ### Added

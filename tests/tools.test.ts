@@ -9,7 +9,9 @@ import {
   liveMatchupsWeek5,
   liveStatsWeek5,
   matchupsWeek5,
+  preKickoffSchedule2026,
   projectionsWeek5,
+  rosters,
 } from "./fixtures.js";
 
 type Connected = Awaited<ReturnType<typeof connectedClient>>;
@@ -359,21 +361,80 @@ describe("projections & stats", () => {
   });
 
   it("get_lineup_projections finds the optimal lineup and flags problems", async () => {
-    const { data } = await c.call("get_lineup_projections", { league_id: LEAGUE_ID, username: "alice" });
-    expect(data).toMatchObject({ week: 5, team_name: "Alice's Avengers" });
-    const current = data!.current_lineup as Record<string, unknown>[];
-    expect(current.map((p) => p.slot)).toEqual(["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DEF"]);
-    const optimal = data!.optimal_lineup as Record<string, unknown>[];
-    // Kelce (Out, 0 pts) should be replaced by LaPorta at TE, and Taylor should move into the lineup over Hall/London.
-    expect(optimal.find((p) => p.slot === "TE")).toMatchObject({ name: "Sam LaPorta" });
-    const optimalNames = optimal.map((p) => p.name);
-    expect(optimalNames).toContain("Jonathan Taylor");
-    expect(optimalNames).not.toContain("Travis Kelce");
-    expect(data!.projected_gain as number).toBeGreaterThan(0);
-    const changes = data!.suggested_changes as { start: Record<string, unknown>[]; sit: Record<string, unknown>[] };
-    expect(changes.sit.map((p) => p.name)).toContain("Travis Kelce");
-    expect(changes.start.map((p) => p.name)).toEqual(expect.arrayContaining(["Sam LaPorta", "Jonathan Taylor"]));
-    expect(data!.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/Travis Kelce .*Out/)]));
+    const o = await connectedClient({ [SCHEDULE_URL]: preKickoffSchedule2026 });
+    try {
+      const { data } = await o.call("get_lineup_projections", { league_id: LEAGUE_ID, username: "alice" });
+      expect(data).toMatchObject({ week: 5, team_name: "Alice's Avengers", game_status_source: "schedule" });
+      const current = data!.current_lineup as Record<string, unknown>[];
+      expect(current.map((p) => p.slot)).toEqual(["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DEF"]);
+      // Before kickoff nobody is locked and there is nothing scored yet.
+      expect(current.some((p) => "status" in p || "scored" in p)).toBe(false);
+      expect(data!.points_so_far).toBeUndefined();
+      expect(data!.note).toBeUndefined();
+      const optimal = data!.optimal_lineup as Record<string, unknown>[];
+      // Kelce (Out, 0 pts) should be replaced by LaPorta at TE, and Taylor should move into the lineup over Hall/London.
+      expect(optimal.find((p) => p.slot === "TE")).toMatchObject({ name: "Sam LaPorta" });
+      const optimalNames = optimal.map((p) => p.name);
+      expect(optimalNames).toContain("Jonathan Taylor");
+      expect(optimalNames).not.toContain("Travis Kelce");
+      expect(data!.projected_gain as number).toBeGreaterThan(0);
+      const changes = data!.suggested_changes as { start: Record<string, unknown>[]; sit: Record<string, unknown>[] };
+      expect(changes.sit.map((p) => p.name)).toContain("Travis Kelce");
+      expect(changes.start.map((p) => p.name)).toEqual(expect.arrayContaining(["Sam LaPorta", "Jonathan Taylor"]));
+      expect(data!.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/Travis Kelce .*Out/)]));
+      expect(o.ff.calls.some((path) => path.includes("/matchups/"))).toBe(false);
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("get_lineup_projections counts points already scored and only moves players who have not played", async () => {
+    // Mid-Sunday: KC final, ATL/NYJ live, CIN/MIN/DET to come, IND on bye. Taylor (bye) sits in the FLEX, Jefferson on the bench.
+    const starters = ["4046", "9226", "8138", "7564", "8112", "5850", "6813", "4195", "DET"];
+    const o = await connectedClient({
+      [`/league/${LEAGUE_ID}/rosters`]: rosters.map((r) => (r.roster_id === 1 ? { ...r, starters } : r)),
+      [`/league/${LEAGUE_ID}/matchups/5`]: liveMatchupsWeek5,
+      "/stats/nfl/regular/2026/5": liveStatsWeek5,
+    });
+    try {
+      const { data } = await o.call("get_lineup_projections", { league_id: LEAGUE_ID, username: "alice" });
+      expect(data!.game_status_source).toBe("schedule");
+      expect(data!.points_so_far).toBe(54.1);
+      const current = new Map((data!.current_lineup as Record<string, unknown>[]).map((p) => [p.name, p]));
+      expect(current.get("Patrick Mahomes")).toMatchObject({ status: "final", scored: 24.1, pts: 24.1 });
+      // 10 scored, plus a quarter of a 20.8 projection (ATL has run 48 of ~64 snaps).
+      expect(current.get("Bijan Robinson")).toMatchObject({ status: "playing", scored: 10, pts: 15.2 });
+      expect(current.get("Ja'Marr Chase")).toEqual(expect.objectContaining({ pts: 19.7 }));
+      expect(current.get("Ja'Marr Chase")).not.toHaveProperty("status");
+      expect(current.get("Jonathan Taylor")).toMatchObject({ status: "bye", pts: 0 });
+      expect(data!.current_projected_total).toBeCloseTo(88.95, 2);
+
+      // Kelce's game is over, so LaPorta cannot replace him even though Kelce scored 0; Jefferson can still take Taylor's FLEX spot.
+      const optimal = data!.optimal_lineup as Record<string, unknown>[];
+      expect(optimal.find((p) => p.slot === "TE")).toMatchObject({ name: "Travis Kelce", status: "final" });
+      expect(optimal.find((p) => p.slot === "FLEX")).toMatchObject({ name: "Justin Jefferson" });
+      expect(data!.optimal_projected_total).toBeCloseTo(108.45, 2);
+      expect(data!.projected_gain).toBe(19.5);
+      const changes = data!.suggested_changes as { start: Record<string, unknown>[]; sit: Record<string, unknown>[] };
+      expect(changes.start.map((p) => p.name)).toEqual(["Justin Jefferson"]);
+      expect(changes.sit.map((p) => p.name)).toEqual(["Jonathan Taylor"]);
+      expect(data!.warnings).toEqual(["Jonathan Taylor (FLEX) is on bye."]);
+      expect(data!.note).toMatch(/^6 starter\(s\) have kicked off/);
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("get_lineup_projections scores from box scores when Sleeper's matchup has no points yet", async () => {
+    const o = await connectedClient({ [`/league/${LEAGUE_ID}/matchups/5`]: [], "/stats/nfl/regular/2026/5": liveStatsWeek5 });
+    try {
+      const { data } = await o.call("get_lineup_projections", { league_id: LEAGUE_ID, username: "alice" });
+      const current = new Map((data!.current_lineup as Record<string, unknown>[]).map((p) => [p.name, p]));
+      // 50 rushing yards under league scoring = 5, plus a quarter of his 20.8 projection.
+      expect(current.get("Bijan Robinson")).toMatchObject({ status: "playing", scored: 5, pts: 10.2 });
+    } finally {
+      await o.close();
+    }
   });
 
   it("get_lineup_projections warns about empty slots", async () => {
