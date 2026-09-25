@@ -1,7 +1,7 @@
 {
   "name": "@joscaz/sleeper-mcp",
   "version": "0.1.0",
-  "description": "Model Context Protocol server for Sleeper fantasy football: resolved player names everywhere, standings, matchups, free agents, drafts, league-scored projections. stdio + Streamable HTTP.",
+  "description": "Model Context Protocol server for Sleeper fantasy football: resolved player names everywhere, standings, matchups, free agents, drafts, league-scored projections, plus optional account tools (lineups, IR, waivers, trades). stdio + Streamable HTTP.",
   "keywords": [
     "mcp",
     "mcp-server",

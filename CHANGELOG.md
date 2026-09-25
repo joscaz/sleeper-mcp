@@ -14,6 +14,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - `get_pending_transactions` searches the current and previous week by default: Sleeper keeps open claims and trade offers filed under the week they were created in, so right after the weekly rollover the queued claims were invisible.
 - HTTP mode refuses to start when a Sleeper session with write tools enabled would listen on a non-loopback address without `SLEEPER_MCP_AUTH_TOKEN`. `SLEEPER_MCP_INSECURE_NO_AUTH=1` overrides for deployments that authenticate in front of the server.
 
+### Changed
+
+- The README leads with `npx -y @joscaz/sleeper-mcp` for every client, keeps a source checkout as the alternative, and no longer says every tool is read-only now that the optional account tools exist. The npm package description mentions the account tools too.
+
 ## [0.1.0] - 2026-09-11
 
 ### Added
