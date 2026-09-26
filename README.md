@@ -14,6 +14,7 @@ Ask Claude, Cursor, or any MCP client things like:
 - "Was the Bijan-for-Chase trade fair? Who won it?"
 - "Who did I draft in round 1 the last three years?"
 - "Am I going to win this week? What are my playoff odds, and how many wins do I need?"
+- "Would trading for Justin Jefferson actually raise my playoff odds? What about picking up a backup RB?"
 - "Move Jacobs to IR, start Corum, and put a claim in for Kaelon Black." *(with a Sleeper session, see [Account tools](#account-tools-optional-session))*
 
 No login, no API key for reads: Sleeper's public API covers everything above the "Account" line. Add your Sleeper session and the same server can also set lineups, manage IR/taxi, submit waiver claims and propose trades.
@@ -32,7 +33,7 @@ There are several community Sleeper MCP servers. This one focuses on the things 
 | Free agents for a league (unrostered, ranked, trending-annotated) | ✅ | ❌ |
 | Projections & stats scored with the **league's exact scoring settings** | ✅ | ❌ (or PPR only) |
 | Start/sit: optimal lineup with slot eligibility (FLEX, SUPER_FLEX, IDP) | ✅ | ❌ |
-| Live win probability and Monte Carlo playoff odds over the real schedule, under league scoring | ✅ | rare |
+| Live win probability, Monte Carlo playoff odds and trade/waiver what-ifs over the real schedule, under league scoring | ✅ | rare |
 | League history across seasons with champions | ✅ | ❌ |
 | Select a team by username, user_id, roster_id **or team name** | ✅ | user_id / roster_id only |
 | "Current week/season" defaults from Sleeper's NFL state | ✅ | manual |
@@ -42,7 +43,7 @@ There are several community Sleeper MCP servers. This one focuses on the things 
 | Tests | 100+ unit + integration tests (in-memory and HTTP transports) plus a live smoke test | varies |
 | Tool annotations, `structuredContent`, prompts, resources | ✅ | partial |
 
-The 24 public-API tools are read-only and need no login. The 11 [account tools](#account-tools-optional-session) (2 private reads, 9 writes) are registered only when you configure a Sleeper session, and `--read-only` keeps the writes off even then.
+The 25 public-API tools are read-only and need no login. The 11 [account tools](#account-tools-optional-session) (2 private reads, 9 writes) are registered only when you configure a Sleeper session, and `--read-only` keeps the writes off even then.
 
 ## Quick start
 
@@ -173,6 +174,7 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 | --- | --- |
 | `get_matchup_odds` | Win probability for a week's matchups, live during games: points so far, projected final and win % per side, plus a starter-by-starter view (final / playing / yet to play / bye) for a selected team. Past weeks come back as results, future weeks as projections. |
 | `get_playoff_odds` | Simulates the rest of the regular season (10,000 runs by default) over the real schedule: playoff %, first-round-bye %, #1-seed %, projected record and average seed for every team. For a selected team, also this week's swing (playoff % if they win vs lose) and playoff % by final win total. |
+| `get_move_impact` | What-if for a trade, waiver claim or add/drop: playoff %, bye %, #1-seed %, projected record and average weekly projection before and after the move for your team and the trade partner, plus who enters and leaves the best lineup and a warning when a roster would be over its limit. |
 
 ### Account tools (optional, session)
 
@@ -230,7 +232,7 @@ CLI flags: `--http`, `--port <n>`, `--host <addr>`, `--user <name>`, `--read-onl
 - **Caching & rate limits.** Every endpoint is cached with a TTL matched to how fast it changes (20 s for live matchups, 5 min for league lists, 24 h for players). Concurrent identical requests are de-duplicated. Outbound calls are capped at 600/min (Sleeper asks for < 1000) and retried with backoff on 429/5xx.
 - **Payload design.** Responses use short keys where they repeat hundreds of times (`{id, name, pos, team, inj, pts}`) and drop empty fields, which keeps token usage down for large leagues.
 - **Projections/stats.** These use Sleeper's `/projections`, `/stats` and `/schedule` endpoints, which power the Sleeper app but are not in the public docs. They have been stable for years; if they change, the rest of the server is unaffected.
-- **Odds.** A starter's remaining points are modeled around their league-scored projection for the share of their game still to play: Sleeper's NFL schedule says which games are final, live or upcoming, and team offensive snaps estimate how far along a live game is. The spread depends on position, and win % is the normal approximation of the score difference. `get_playoff_odds` plays out every remaining week with each team's best projected lineup (the week in progress starts from live points), adds a season-long projection error per team, counts median games when the league plays them, and seeds by record, then points for. Runs are seeded, so the same data always gives the same odds.
+- **Odds.** A starter's remaining points are modeled around their league-scored projection for the share of their game still to play: Sleeper's NFL schedule says which games are final, live or upcoming, and team offensive snaps estimate how far along a live game is. The spread depends on position, and win % is the normal approximation of the score difference. `get_playoff_odds` plays out every remaining week with each team's best projected lineup (the week in progress starts from live points), adds a season-long projection error per team, counts median games when the league plays them, and seeds by record, then points for. Runs are seeded, so the same data always gives the same odds. `get_move_impact` runs that simulation twice with the same random draws, before and after the move (which counts from the next week that has not started), so the difference comes from the move rather than chance: a pickup that would not start changes nothing.
 
 ## Development
 
