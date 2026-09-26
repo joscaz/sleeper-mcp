@@ -44,6 +44,7 @@ describe("server surface", () => {
         "get_lineup_projections",
         "get_matchup_odds",
         "get_matchups",
+        "get_move_impact",
         "get_nfl_state",
         "get_player",
         "get_player_stats",
@@ -627,6 +628,121 @@ describe("odds", () => {
       expect(res.text).toContain("draft");
     } finally {
       await early.close();
+    }
+  });
+
+  // Weeks 6-14 on a rotating schedule, with the week-5 projections every week.
+  const restOfSeason = (): Record<string, unknown> => {
+    const routes: Record<string, unknown> = {};
+    const rotation = [
+      [1, 3, 2, 4],
+      [1, 4, 2, 3],
+      [1, 2, 3, 4],
+    ];
+    for (let week = 6; week <= 14; week++) {
+      routes[`/league/${LEAGUE_ID}/matchups/${week}`] = rotation[week % 3]!.map((roster_id, i) => ({
+        roster_id,
+        matchup_id: i < 2 ? 1 : 2,
+        points: 0,
+        custom_points: null,
+        starters: [],
+        players: [],
+        players_points: {},
+      }));
+      routes[`/projections/nfl/regular/2026/${week}`] = projectionsWeek5;
+    }
+    return routes;
+  };
+  type LineupChange = { week: number; now_starting: { name: string }[]; no_longer_starting: { name: string }[] };
+  type Impact = {
+    roster_id: number;
+    team_name: string;
+    playoff_pct_before: number;
+    playoff_pct_after: number;
+    playoff_pct_change: number;
+    weekly_projection_before: number;
+    weekly_projection_after: number;
+    lineup_change?: LineupChange;
+  };
+  const names = (players: { name: string }[]) => players.map((p) => p.name);
+
+  it("get_move_impact shows how a trade moves both teams' playoff odds", async () => {
+    // One playoff spot, so the trade decides whether Alice or Bob gets it.
+    const oneSpot = { [`/league/${LEAGUE_ID}`]: { ...league, settings: { ...league.settings, playoff_teams: 1 } } };
+    const o = await connectedClient({ ...live, ...restOfSeason(), ...oneSpot });
+    try {
+      const res = await o.call("get_move_impact", {
+        league_id: LEAGUE_ID,
+        username: "alice",
+        give: ["Patrick Mahomes", "Bijan Robinson", "Ja'Marr Chase", "Justin Jefferson", "Sam LaPorta", "Jonathan Taylor"],
+        receive: ["Josh Allen"],
+      });
+      const d = res.data!;
+      expect(d.move).toMatchObject({ effective_week: 6, receive: [{ name: "Josh Allen" }] });
+      expect((d.move as { trade_partner: string }).trade_partner).toContain("Bobby Tables");
+      const [alice, bob] = d.impact as Impact[];
+      expect(alice).toMatchObject({ team_name: "Alice's Avengers", playoff_pct_before: 100 });
+      expect(alice!.playoff_pct_change).toBeLessThan(-50);
+      expect(bob!.playoff_pct_change).toBeGreaterThan(50);
+      expect(alice!.playoff_pct_change + bob!.playoff_pct_change).toBeCloseTo(0, 0); // the one spot changes hands
+      expect(d.other_teams).toBeUndefined();
+      expect(alice!.weekly_projection_after).toBeLessThan(alice!.weekly_projection_before);
+      expect(names(alice!.lineup_change!.now_starting)).toContain("Josh Allen");
+      expect(names(alice!.lineup_change!.no_longer_starting)).toEqual(expect.arrayContaining(["Patrick Mahomes", "Bijan Robinson"]));
+      expect((d.notes as string[]).join(" ")).toContain("Week 5 has already started, so the move counts from week 6");
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("get_move_impact reports no change for a pickup that would not start", async () => {
+    const o = await connectedClient({ ...live, ...restOfSeason() });
+    try {
+      const res = await o.call("get_move_impact", { league_id: LEAGUE_ID, username: "alice", add: ["Rookie Runner"], drop: ["Travis Kelce"] });
+      const d = res.data!;
+      expect(d.move).toMatchObject({ add: [{ name: "Rookie Runner" }], drop: [{ name: "Travis Kelce" }], effective_week: 6 });
+      expect(d.impact as Impact[]).toHaveLength(1);
+      const [alice] = d.impact as Impact[];
+      // Identical lineups mean identical simulations: with shared random draws the difference is exactly zero.
+      expect(alice!.playoff_pct_change).toBe(0);
+      expect(alice!.weekly_projection_after).toBe(alice!.weekly_projection_before);
+      expect(alice!.lineup_change).toMatchObject({ week: 6, now_starting: [], no_longer_starting: [] });
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("get_move_impact flags roster overflow and explains moves it cannot simulate", async () => {
+    const withCarolQb = rosters.map((r) => (r.roster_id === 3 ? { ...r, players: ["11002"] } : r));
+    const o = await connectedClient({ ...live, ...restOfSeason(), [`/league/${LEAGUE_ID}/rosters`]: withCarolQb });
+    try {
+      const overflow = await o.call("get_move_impact", { league_id: LEAGUE_ID, username: "alice", add: ["Rookie Runner", "Handcuff Harry"] });
+      expect((overflow.data!.notes as string[]).join(" ")).toContain("13 players for 12 active roster spots");
+
+      const rejects = async (args: Record<string, unknown>, message: string) => {
+        const res = await o.call("get_move_impact", { league_id: LEAGUE_ID, username: "alice", ...args });
+        expect(res.result.isError, JSON.stringify(args)).toBe(true);
+        expect(res.text).toContain(message);
+      };
+      await rejects({}, "at least one of give, receive, add or drop");
+      await rejects({ add: ["Josh Allen"] }, "list them under receive"); // on Bob's roster
+      await rejects({ receive: ["Rookie Runner"] }, "use add instead"); // a free agent
+      await rejects({ give: ["Josh Allen"], receive: ["Streamer Steve"] }, "not on Alice's Avengers");
+      await rejects({ receive: ["Josh Allen", "Streamer Steve"] }, "different teams");
+      await rejects({ give: ["Travis Kelce"] }, "Name the trade partner");
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("get_move_impact explains when the regular season is over", async () => {
+    const over = await connectedClient({ [`/league/${LEAGUE_ID}`]: { ...league, settings: { ...league.settings, last_scored_leg: 14 } } });
+    try {
+      const res = await over.call("get_move_impact", { league_id: LEAGUE_ID, username: "alice", add: ["Rookie Runner"] });
+      expect(res.result.isError).toBe(true);
+      expect(res.text).toContain("regular season");
+    } finally {
+      await over.close();
     }
   });
 });

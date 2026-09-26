@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { hasTeamSelector, loadLeague, resolveRoster, resolveWeek, ToolError, type LeagueBundle, type ServerContext, type TeamSelector } from "../context.js";
-import { isTeamDefense } from "../sleeper/players.js";
-import type { Matchup, Roster, StatMap } from "../sleeper/types.js";
+import { isTeamDefense, normalizeName } from "../sleeper/players.js";
+import type { Matchup, NflState, Roster, StatMap } from "../sleeper/types.js";
 import { num, points, record, round, scoreStatLine, startingSlots, teamLabel } from "../format.js";
 import { loadWeekGames, weekIsOver, type GameState, type WeekGames } from "../games.js";
 import {
@@ -13,11 +13,14 @@ import {
   teamOutlook,
   winProbability,
   type ScoreDistribution,
+  type SimOptions,
+  type SimResult,
   type SimTeam,
   type SimWeek,
   type StarterOutlook,
   type TeamOutlook,
 } from "../odds.js";
+import { findOnRoster, resolveAnyPlayer } from "./account.js";
 import { standings } from "./leagues.js";
 import { optimalStarters } from "./stats.js";
 import { guard, leagueIdSchema, teamSelectorShape, weekSchema } from "./shared.js";
@@ -85,6 +88,37 @@ export function registerOddsTools(server: McpServer, ctx: ServerContext): void {
     },
     async ({ league_id, simulations, ...selector }) => guard(() => playoffOdds(ctx, league_id, simulations, selector)),
   );
+
+  server.registerTool(
+    "get_move_impact",
+    {
+      title: "What-if: trade or add/drop impact on playoff odds",
+      description:
+        "What a trade, waiver claim or add/drop would do to playoff odds, for your team and the trade partner. Simulates the rest of the regular season twice with the same random draws (current rosters vs rosters after the move, which counts from the next week that has not started), so the gap reflects the move, not chance. Returns before/after playoff %, bye %, #1-seed %, projected record and average weekly projection, plus who enters and leaves the best lineup. Draft picks and FAAB don't change this season's simulation, so leave them out.",
+      inputSchema: {
+        league_id: leagueIdSchema,
+        ...teamSelectorShape,
+        give: playerList("Players your team sends away in a trade (names or player_ids)."),
+        receive: playerList("Players your team gets in a trade. They must all be on one team, which becomes the trade partner."),
+        partner: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe("Trade partner (username, team name or roster_id). Only needed when you receive nobody, e.g. a player for draft picks."),
+        add: playerList("Free agents to pick up (waiver claim or free-agent add)."),
+        drop: playerList("Players to release."),
+        simulations: z.number().int().min(1000).max(50000).default(10000).describe("Number of simulated seasons (default 10,000)."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ league_id, give, receive, partner, add, drop, simulations, ...selector }) =>
+      guard(() => moveImpact(ctx, league_id, { give: give ?? [], receive: receive ?? [], partner, add: add ?? [], drop: drop ?? [] }, simulations, selector)),
+  );
+}
+
+function playerList(description: string) {
+  return z.array(z.string().trim().min(1)).max(10).optional().describe(description);
 }
 
 // ---------------------------------------------------------------------------
@@ -226,43 +260,64 @@ function describeMatchupOdds(
 // Rest-of-season simulation
 // ---------------------------------------------------------------------------
 
-async function playoffOdds(ctx: ServerContext, leagueId: string, simulations: number, selector: TeamSelector) {
-  const bundle = await loadLeague(ctx, leagueId);
+interface PlayoffFormat {
+  playoffTeams: number;
+  playoffStart: number;
+}
+
+/** The league's playoff format. Errors when there is nothing to simulate (no playoffs, or no rosters yet). */
+function playoffFormat(bundle: LeagueBundle): PlayoffFormat {
   const { league } = bundle;
-  const settings = league.settings ?? {};
-  const playoffTeams = num(settings.playoff_teams);
-  const playoffStart = num(settings.playoff_week_start);
+  const playoffTeams = num(league.settings?.playoff_teams);
+  const playoffStart = num(league.settings?.playoff_week_start);
   if (!playoffTeams || !playoffStart) {
     throw new ToolError(`League "${league.name}" has no playoff format (playoff_teams / playoff_week_start), so there is nothing to simulate.`);
   }
   if (league.status === "pre_draft" || league.status === "drafting") {
     throw new ToolError(`League "${league.name}" has not finished its draft (status: ${league.status}); playoff odds need rosters and a schedule.`);
   }
+  return { playoffTeams, playoffStart };
+}
 
-  const state = await ctx.client.getNflState("nfl");
-  const lastScored = num(settings.last_scored_leg);
-  const firstWeek = Math.max(num(settings.start_week) || 1, lastScored + 1);
-  const lastWeek = playoffStart - 1;
-  const base = { league_id: league.league_id, league: league.name, season: league.season, playoff_teams: playoffTeams };
+interface SeasonWindow {
+  lastScored: number;
+  firstWeek: number;
+  lastWeek: number;
+  /** The NFL week in progress for this league's season (0 outside the regular season). */
+  currentWeek: number;
+  /** The regular season is over: nothing left to simulate. */
+  over: boolean;
+}
 
-  if (league.status === "complete" || firstWeek > lastWeek || Number(league.season) < Number(state.season)) {
-    const table = standings(league, bundle.rosters, bundle.teams).standings;
-    return {
-      ...base,
-      status: "regular_season_over",
-      note: `The regular season is over (playoffs start in week ${playoffStart}), so there is nothing left to simulate. Seeds follow the final standings; use get_playoff_bracket for the playoffs themselves.`,
-      seeds: table.slice(0, playoffTeams).map((r) => ({ seed: r.rank, team_name: r.team_name, manager: r.manager, record: r.record, points_for: r.points_for })),
-    };
-  }
-
-  let focusRosterId: number | undefined;
-  if (hasTeamSelector(selector)) focusRosterId = (await resolveRoster(ctx, bundle, selector)).roster_id;
-  else if (ctx.defaultUser) focusRosterId = await resolveRoster(ctx, bundle, {}).then((r) => r.roster_id, () => undefined);
-
-  await ctx.players.ensureLoaded();
+function seasonWindow(bundle: LeagueBundle, format: PlayoffFormat, state: NflState): SeasonWindow {
+  const { league } = bundle;
+  const lastScored = num(league.settings?.last_scored_leg);
+  const firstWeek = Math.max(num(league.settings?.start_week) || 1, lastScored + 1);
+  const lastWeek = format.playoffStart - 1;
   const currentWeek = league.season === state.season && state.season_type === "regular" ? state.week : 0;
-  const loaded = await mapLimit(range(firstWeek, lastWeek), 4, async (week) => {
-    const live = week <= currentWeek;
+  const over = league.status === "complete" || firstWeek > lastWeek || Number(league.season) < Number(state.season);
+  return { lastScored, firstWeek, lastWeek, currentWeek, over };
+}
+
+interface LoadedWeek {
+  week: number;
+  matchups: Matchup[];
+  projections: StatMap;
+  /** Game states for weeks already under way; null for weeks that have not started. */
+  games: WeekGames | null;
+}
+
+interface SeasonPlan extends PlayoffFormat, SeasonWindow {
+  bundle: LeagueBundle;
+  weeks: LoadedWeek[];
+}
+
+/** Matchups, projections and (for weeks under way) game states for every remaining regular-season week. */
+async function loadSeasonPlan(ctx: ServerContext, bundle: LeagueBundle, format: PlayoffFormat, window: SeasonWindow, state: NflState): Promise<SeasonPlan> {
+  const { league } = bundle;
+  await ctx.players.ensureLoaded();
+  const weeks = await mapLimit(range(window.firstWeek, window.lastWeek), 4, async (week): Promise<LoadedWeek> => {
+    const live = week <= window.currentWeek;
     const over = live && weekIsOver(league.season, week, state);
     const [matchups, projections, games] = await Promise.all([
       ctx.client.getMatchups(league.league_id, week),
@@ -271,18 +326,34 @@ async function playoffOdds(ctx: ServerContext, leagueId: string, simulations: nu
     ]);
     return { week, matchups, projections, games };
   });
+  return { bundle, ...format, ...window, weeks };
+}
 
-  // Weeks that have not started: every team's best projected lineup. A week Sleeper has no projections
-  // for yet borrows the nearest week that has them.
-  const projected = loaded.map((w) =>
-    w.games || !Object.keys(w.projections).length ? null : new Map(bundle.rosters.map((r) => [r.roster_id, projectedWeek(ctx, bundle, r, w.projections)])),
+interface SimInputs {
+  weeks: SimWeek[];
+  missingProjections: number[];
+  unknownSchedule: number[];
+  opponents: Map<number, { sum: number; n: number }>;
+}
+
+/**
+ * Simulation weeks for a season plan. Weeks under way start from live points; weeks that have not started use
+ * every team's best projected lineup, built from `players` where given (a what-if) and the current rosters
+ * otherwise. A week Sleeper has no projections for yet borrows the nearest week that has them.
+ */
+function buildSimWeeks(ctx: ServerContext, plan: SeasonPlan, players?: ReadonlyMap<number, readonly string[]>): SimInputs {
+  const { bundle } = plan;
+  const projected = plan.weeks.map((w) =>
+    w.games || !Object.keys(w.projections).length
+      ? null
+      : new Map(bundle.rosters.map((r) => [r.roster_id, projectedWeek(ctx, bundle, r, w.projections, players?.get(r.roster_id))])),
   );
   const withProjections = projected.flatMap((p, i) => (p ? [i] : []));
   const missingProjections: number[] = [];
   const unknownSchedule: number[] = [];
   const opponents = new Map<number, { sum: number; n: number }>();
 
-  const weeks: SimWeek[] = loaded.map((w, i) => {
+  const weeks: SimWeek[] = plan.weeks.map((w, i) => {
     let scores: Map<number, ScoreDistribution>;
     const games = w.games;
     if (games) {
@@ -292,7 +363,7 @@ async function playoffOdds(ctx: ServerContext, leagueId: string, simulations: nu
       if (!p) {
         const nearest = nearestIndex(withProjections, i);
         if (nearest === undefined) {
-          throw new ToolError(`Sleeper has no projections for weeks ${firstWeek}-${lastWeek} yet, so the season cannot be simulated.`);
+          throw new ToolError(`Sleeper has no projections for weeks ${plan.firstWeek}-${plan.lastWeek} yet, so the season cannot be simulated.`);
         }
         missingProjections.push(w.week);
         p = projected[nearest]!;
@@ -307,30 +378,75 @@ async function playoffOdds(ctx: ServerContext, leagueId: string, simulations: nu
     }
     return { week: w.week, pairs, scores, projected: !games };
   });
+  return { weeks, missingProjections, unknownSchedule, opponents };
+}
 
-  const teams: SimTeam[] = bundle.rosters.map((r) => ({
+function simTeams(bundle: LeagueBundle): SimTeam[] {
+  return bundle.rosters.map((r) => ({
     roster_id: r.roster_id,
     wins: num(r.settings?.wins),
     losses: num(r.settings?.losses),
     ties: num(r.settings?.ties),
     points_for: points(r.settings, "fpts"),
   }));
-  const byes = firstRoundByes(playoffTeams);
-  const medianGame = num(settings.league_average_match) === 1;
-  const sim = simulateSeason(teams, weeks, {
+}
+
+/** The seed depends only on the league and week, so repeated calls and before/after what-ifs share their random draws. */
+function simOptions(plan: SeasonPlan, simulations: number, focusRosterId?: number): SimOptions {
+  return {
     simulations,
-    seed: hashSeed(`${league.league_id}:${lastScored}:${currentWeek}`),
-    playoffTeams,
-    byes,
-    medianGame,
+    seed: hashSeed(`${plan.bundle.league.league_id}:${plan.lastScored}:${plan.currentWeek}`),
+    playoffTeams: plan.playoffTeams,
+    byes: firstRoundByes(plan.playoffTeams),
+    medianGame: num(plan.bundle.league.settings?.league_average_match) === 1,
     focusRosterId,
-  });
+  };
+}
+
+function simulationNotes(bundle: LeagueBundle, inputs: SimInputs): string[] {
+  const notes: string[] = [];
+  if (num(bundle.league.settings?.divisions) > 0) notes.push("This league has divisions: seeds here go by record, then points for, without division-winner berths.");
+  if (inputs.unknownSchedule.length) notes.push(`Sleeper has no matchups scheduled for week(s) ${inputs.unknownSchedule.join(", ")}; opponents were drawn at random.`);
+  if (inputs.missingProjections.length) notes.push(`No projections yet for week(s) ${inputs.missingProjections.join(", ")}; the nearest week's projections stand in.`);
+  return notes;
+}
+
+function weeksLabel(plan: SeasonPlan): string {
+  return plan.firstWeek === plan.lastWeek ? String(plan.firstWeek) : `${plan.firstWeek}-${plan.lastWeek}`;
+}
+
+async function playoffOdds(ctx: ServerContext, leagueId: string, simulations: number, selector: TeamSelector) {
+  const bundle = await loadLeague(ctx, leagueId);
+  const { league } = bundle;
+  const format = playoffFormat(bundle);
+  const state = await ctx.client.getNflState("nfl");
+  const window = seasonWindow(bundle, format, state);
+  const base = { league_id: league.league_id, league: league.name, season: league.season, playoff_teams: format.playoffTeams };
+
+  if (window.over) {
+    const table = standings(league, bundle.rosters, bundle.teams).standings;
+    return {
+      ...base,
+      status: "regular_season_over",
+      note: `The regular season is over (playoffs start in week ${format.playoffStart}), so there is nothing left to simulate. Seeds follow the final standings; use get_playoff_bracket for the playoffs themselves.`,
+      seeds: table.slice(0, format.playoffTeams).map((r) => ({ seed: r.rank, team_name: r.team_name, manager: r.manager, record: r.record, points_for: r.points_for })),
+    };
+  }
+
+  let focusRosterId: number | undefined;
+  if (hasTeamSelector(selector)) focusRosterId = (await resolveRoster(ctx, bundle, selector)).roster_id;
+  else if (ctx.defaultUser) focusRosterId = await resolveRoster(ctx, bundle, {}).then((r) => r.roster_id, () => undefined);
+
+  const plan = await loadSeasonPlan(ctx, bundle, format, window, state);
+  const inputs = buildSimWeeks(ctx, plan);
+  const options = simOptions(plan, simulations, focusRosterId);
+  const sim = simulateSeason(simTeams(bundle), inputs.weeks, options);
 
   const pct = (p: number) => round(p * 100, 1);
   const rows = sim.teams
     .map((t) => {
       const roster = bundle.rosters.find((r) => r.roster_id === t.roster_id);
-      const opp = opponents.get(t.roster_id);
+      const opp = inputs.opponents.get(t.roster_id);
       const row: Record<string, unknown> = {
         roster_id: t.roster_id,
         team_name: teamNameOf(bundle, t.roster_id),
@@ -340,7 +456,7 @@ async function playoffOdds(ctx: ServerContext, leagueId: string, simulations: nu
         projected_record: formatRecord(t.avg_wins, t.avg_losses, t.avg_ties),
         playoff_pct: pct(t.playoffs),
       };
-      if (byes) row.bye_pct = pct(t.bye);
+      if (options.byes) row.bye_pct = pct(t.bye);
       row.top_seed_pct = pct(t.top_seed);
       row.avg_seed = round(t.avg_seed, 1);
       row.remaining_opponents_avg = opp?.n ? round(opp.sum / opp.n, 1) : null;
@@ -364,17 +480,13 @@ async function playoffOdds(ctx: ServerContext, leagueId: string, simulations: nu
     by_final_wins: f.by_final_wins.filter((e) => e.share >= 0.005).map((e) => ({ wins: e.wins, chance_pct: pct(e.share), playoff_pct: pct(e.playoffs) })),
   };
 
-  const notes: string[] = [];
-  if (num(settings.divisions) > 0) notes.push("This league has divisions: seeds here go by record, then points for, without division-winner berths.");
-  if (unknownSchedule.length) notes.push(`Sleeper has no matchups scheduled for week(s) ${unknownSchedule.join(", ")}; opponents were drawn at random.`);
-  if (missingProjections.length) notes.push(`No projections yet for week(s) ${missingProjections.join(", ")}; the nearest week's projections stand in.`);
-
+  const notes = simulationNotes(bundle, inputs);
   return {
     ...base,
-    weeks_simulated: firstWeek === lastWeek ? String(firstWeek) : `${firstWeek}-${lastWeek}`,
+    weeks_simulated: weeksLabel(plan),
     simulations: sim.simulations,
-    ...(byes ? { first_round_byes: byes } : {}),
-    ...(medianGame ? { median_game: true } : {}),
+    ...(options.byes ? { first_round_byes: options.byes } : {}),
+    ...(options.medianGame ? { median_game: true } : {}),
     teams: rows,
     ...(focus ? { focus } : {}),
     ...(notes.length ? { notes } : {}),
@@ -382,16 +494,285 @@ async function playoffOdds(ctx: ServerContext, leagueId: string, simulations: nu
   };
 }
 
-/** Projected score distribution for a roster's best lineup (IR and taxi players cannot start). */
-function projectedWeek(ctx: ServerContext, bundle: LeagueBundle, roster: Roster, projections: StatMap): ScoreDistribution {
+// ---------------------------------------------------------------------------
+// What-if: a trade or add/drop, simulated against the same random draws
+// ---------------------------------------------------------------------------
+
+interface MoveInput {
+  give: string[];
+  receive: string[];
+  partner?: string;
+  add: string[];
+  drop: string[];
+}
+
+interface ResolvedMove {
+  give: string[];
+  receive: string[];
+  add: string[];
+  drop: string[];
+  partner: Roster | null;
+  /** Player lists after the move, for the rosters it touches. */
+  players: Map<number, string[]>;
+}
+
+async function moveImpact(ctx: ServerContext, leagueId: string, input: MoveInput, simulations: number, selector: TeamSelector) {
+  if (!input.give.length && !input.receive.length && !input.add.length && !input.drop.length) {
+    throw new ToolError("Describe the move with at least one of give, receive, add or drop.");
+  }
+  const bundle = await loadLeague(ctx, leagueId);
+  const { league } = bundle;
+  const format = playoffFormat(bundle);
+  const state = await ctx.client.getNflState("nfl");
+  const window = seasonWindow(bundle, format, state);
+  if (window.over) {
+    throw new ToolError(`The regular season in "${league.name}" is over (playoffs start in week ${format.playoffStart}), so a roster move can no longer change playoff odds.`);
+  }
+
+  await ctx.players.ensureLoaded();
+  const mine = await resolveRoster(ctx, bundle, selector);
+  const move = await resolveMove(ctx, bundle, mine, input);
+
+  const plan = await loadSeasonPlan(ctx, bundle, format, window, state);
+  const firstOpen = plan.weeks.findIndex((w) => !w.games);
+  if (firstOpen < 0) {
+    throw new ToolError(`Week ${plan.lastWeek} is the last regular-season week and it has already started, so a roster move can no longer change playoff odds.`);
+  }
+  const effectiveWeek = plan.weeks[firstOpen]!.week;
+
+  // Same seed, weeks and pairings: both runs see identical random draws, so the gap between them is the move.
+  const before = buildSimWeeks(ctx, plan);
+  const after = buildSimWeeks(ctx, plan, move.players);
+  const options = simOptions(plan, simulations);
+  const teams = simTeams(bundle);
+  const simBefore = simulateSeason(teams, before.weeks, options);
+  const simAfter = simulateSeason(teams, after.weeks, options);
+
+  const pct = (p: number) => round(p * 100, 1);
+  const resultFor = (sim: SimResult, rosterId: number) => sim.teams.find((t) => t.roster_id === rosterId)!;
+  const lineupWeek = plan.weeks.slice(firstOpen).find((w) => Object.keys(w.projections).length > 0);
+
+  const impactFor = (roster: Roster) => {
+    const b = resultFor(simBefore, roster.roster_id);
+    const a = resultFor(simAfter, roster.roster_id);
+    const out: Record<string, unknown> = {
+      roster_id: roster.roster_id,
+      team_name: teamNameOf(bundle, roster.roster_id),
+      manager: bundle.teams.get(roster.roster_id)?.manager ?? null,
+      playoff_pct_before: pct(b.playoffs),
+      playoff_pct_after: pct(a.playoffs),
+      playoff_pct_change: pct(a.playoffs - b.playoffs),
+    };
+    if (options.byes) {
+      out.bye_pct_before = pct(b.bye);
+      out.bye_pct_after = pct(a.bye);
+    }
+    out.top_seed_pct_before = pct(b.top_seed);
+    out.top_seed_pct_after = pct(a.top_seed);
+    out.projected_record_before = formatRecord(b.avg_wins, b.avg_losses, b.avg_ties);
+    out.projected_record_after = formatRecord(a.avg_wins, a.avg_losses, a.avg_ties);
+    out.weekly_projection_before = round(averageProjection(before, roster.roster_id), 1);
+    out.weekly_projection_after = round(averageProjection(after, roster.roster_id), 1);
+    if (lineupWeek) out.lineup_change = lineupChange(ctx, bundle, roster, lineupWeek, move.players.get(roster.roster_id));
+    return out;
+  };
+
+  const touched = new Set(move.players.keys());
+  const otherTeams = simAfter.teams
+    .filter((t) => !touched.has(t.roster_id))
+    .map((a) => ({ a, b: resultFor(simBefore, a.roster_id) }))
+    .filter(({ a, b }) => Math.abs(a.playoffs - b.playoffs) >= 0.01)
+    .sort((x, y) => Math.abs(y.a.playoffs - y.b.playoffs) - Math.abs(x.a.playoffs - x.b.playoffs))
+    .map(({ a, b }) => ({
+      team_name: teamNameOf(bundle, a.roster_id),
+      playoff_pct_before: pct(b.playoffs),
+      playoff_pct_after: pct(a.playoffs),
+      playoff_pct_change: pct(a.playoffs - b.playoffs),
+    }));
+
+  const notes: string[] = [];
+  if (firstOpen > 0) {
+    const started = plan.weeks.slice(0, firstOpen).map((w) => w.week);
+    const which = started.length === 1 ? `Week ${started[0]} has` : `Weeks ${started[0]}-${started[started.length - 1]} have`;
+    notes.push(`${which} already started, so the move counts from week ${effectiveWeek}.`);
+  }
+  notes.push(...rosterSizeNotes(bundle, mine, move), ...simulationNotes(bundle, before));
+
+  return {
+    league_id: league.league_id,
+    league: league.name,
+    season: league.season,
+    team: teamNameOf(bundle, mine.roster_id),
+    move: {
+      ...(move.partner ? { trade_partner: teamLabel(bundle.teams, move.partner.roster_id) } : {}),
+      ...(move.give.length ? { give: ctx.players.refs(move.give) } : {}),
+      ...(move.receive.length ? { receive: ctx.players.refs(move.receive) } : {}),
+      ...(move.add.length ? { add: ctx.players.refs(move.add) } : {}),
+      ...(move.drop.length ? { drop: ctx.players.refs(move.drop) } : {}),
+      effective_week: effectiveWeek,
+    },
+    impact: [impactFor(mine), ...(move.partner ? [impactFor(move.partner)] : [])],
+    ...(otherTeams.length ? { other_teams: otherTeams } : {}),
+    weeks_simulated: weeksLabel(plan),
+    simulations: simAfter.simulations,
+    ...(notes.length ? { notes } : {}),
+    method: `Ran the rest-of-season simulation twice with the same random draws, once with current rosters and once with the move applied from week ${effectiveWeek}. Every week each team starts its best projected lineup under league scoring, so the gap between the two runs comes from the move rather than chance.`,
+  };
+}
+
+async function resolveMove(ctx: ServerContext, bundle: LeagueBundle, mine: Roster, input: MoveInput): Promise<ResolvedMove> {
+  const myTeam = teamNameOf(bundle, mine.roster_id);
+  const others = bundle.rosters.filter((r) => r.roster_id !== mine.roster_id);
+  const give = input.give.map((p) => findOnRoster(ctx, mine, p, myTeam));
+  const drop = input.drop.map((p) => findOnRoster(ctx, mine, p, myTeam));
+  const receive = input.receive.map((p) => findOnOtherTeam(ctx, bundle, mine, others, p));
+  const add = input.add.map((p) => findFreeAgent(ctx, bundle, mine, p));
+
+  const all = [...give, ...drop, ...receive, ...add];
+  const repeated = all.find((id, i) => all.indexOf(id) !== i);
+  if (repeated) throw new ToolError(`${ctx.players.label(repeated)} appears more than once in the move.`);
+
+  const ownerOf = (id: string) => others.find((r) => r.players?.includes(id))!;
+  const owners = [...new Set(receive.map((id) => ownerOf(id).roster_id))];
+  if (owners.length > 1) {
+    throw new ToolError(
+      `The players to receive are on different teams (${owners.map((id) => teamLabel(bundle.teams, id)).join("; ")}). Three-team trades are not supported: simulate one partner at a time.`,
+    );
+  }
+  let partner = receive.length ? ownerOf(receive[0]!) : null;
+  if (input.partner) {
+    if (!give.length && !receive.length) throw new ToolError("partner only applies to trades: list the players you give or receive.");
+    const named = await resolveTradePartner(ctx, bundle, input.partner);
+    if (named.roster_id === mine.roster_id) throw new ToolError("The trade partner can't be your own team.");
+    if (partner && partner.roster_id !== named.roster_id) {
+      throw new ToolError(`The players to receive are on ${teamLabel(bundle.teams, partner.roster_id)}, not ${teamLabel(bundle.teams, named.roster_id)}.`);
+    }
+    partner = named;
+  }
+  if (give.length && !partner) throw new ToolError("Who gets the players you give? Name the trade partner with partner, or list the players you receive.");
+
+  const leaving = new Set([...give, ...drop]);
+  const players = new Map<number, string[]>([[mine.roster_id, [...(mine.players ?? []).filter((id) => !leaving.has(id)), ...receive, ...add]]]);
+  if (partner) {
+    const incoming = new Set(receive);
+    players.set(partner.roster_id, [...(partner.players ?? []).filter((id) => !incoming.has(id)), ...give]);
+  }
+  return { give, receive, add, drop, partner, players };
+}
+
+async function resolveTradePartner(ctx: ServerContext, bundle: LeagueBundle, partner: string): Promise<Roster> {
+  const trimmed = partner.trim();
+  return /^\d{1,3}$/.test(trimmed) ? resolveRoster(ctx, bundle, { roster_id: Number(trimmed) }) : resolveRoster(ctx, bundle, { team: trimmed });
+}
+
+const DEF_SUFFIX = /\s+(def|dst|d\/st|defense)$/i;
+
+/** Players among `ids` matching a name or player_id: exact full names first, then partial or last-name matches. */
+function matchPlayers(ctx: ServerContext, ids: readonly string[], input: string): string[] {
+  const raw = input.trim();
+  if (ids.includes(raw)) return [raw];
+  if (ids.includes(raw.toUpperCase())) return [raw.toUpperCase()];
+  const q = normalizeName(raw.replace(DEF_SUFFIX, ""));
+  if (!q) return [];
+  const named = ids.map((id) => ({ id, name: normalizeName(ctx.players.ref(id).name), last: normalizeName(ctx.players.raw(id)?.last_name ?? "") }));
+  const exact = named.filter((n) => n.name === q);
+  return (exact.length ? exact : named.filter((n) => n.name.includes(q) || n.last === q)).map((n) => n.id);
+}
+
+/** A player on another team's roster, by name or player_id. */
+function findOnOtherTeam(ctx: ServerContext, bundle: LeagueBundle, mine: Roster, others: readonly Roster[], input: string): string {
+  const matches = matchPlayers(ctx, others.flatMap((r) => r.players ?? []), input);
+  if (matches.length === 1) return matches[0]!;
+  if (matches.length > 1) {
+    const owner = (id: string) => teamLabel(bundle.teams, others.find((r) => r.players?.includes(id))?.roster_id);
+    throw new ToolError(`"${input}" matches several rostered players: ${matches.map((id) => `${ctx.players.label(id)} on ${owner(id)}`).join("; ")}. Use the player_id.`);
+  }
+  const id = resolveAnyPlayer(ctx, input);
+  if (mine.players?.includes(id)) throw new ToolError(`${ctx.players.label(id)} is already on ${teamNameOf(bundle, mine.roster_id)}; list them under give to trade them away.`);
+  throw new ToolError(`${ctx.players.label(id)} is a free agent in this league; use add instead of receive.`);
+}
+
+/** A free agent, by name or player_id (the same matching add_drop_player uses). */
+function findFreeAgent(ctx: ServerContext, bundle: LeagueBundle, mine: Roster, input: string): string {
+  const id = resolveAnyPlayer(ctx, input);
+  const owner = bundle.rosters.find((r) => r.players?.includes(id));
+  if (owner?.roster_id === mine.roster_id) throw new ToolError(`${ctx.players.label(id)} is already on ${teamNameOf(bundle, mine.roster_id)}.`);
+  if (owner) throw new ToolError(`${ctx.players.label(id)} is rostered by ${teamLabel(bundle.teams, owner.roster_id)}, so getting them is a trade: list them under receive.`);
+  return id;
+}
+
+/** A roster's average projected score over the weeks that have not started. */
+function averageProjection(inputs: SimInputs, rosterId: number): number {
+  const means = inputs.weeks.filter((w) => w.projected).map((w) => w.scores.get(rosterId)?.mean ?? 0);
+  return means.length ? means.reduce((sum, m) => sum + m, 0) / means.length : 0;
+}
+
+/** Who enters and leaves a roster's best projected lineup in `week` when its players change. */
+function lineupChange(ctx: ServerContext, bundle: LeagueBundle, roster: Roster, week: LoadedWeek, playersAfter: readonly string[] | undefined) {
+  const slots = startingSlots(bundle.league);
+  const before = bestLineup(ctx, bundle, roster, week.projections);
+  const after = bestLineup(ctx, bundle, roster, week.projections, playersAfter);
+  const ids = (lineup: Lineup) => new Set(lineup.starters.filter((id): id is string => Boolean(id)));
+  const was = ids(before);
+  const now = ids(after);
+  const describe = (lineup: Lineup, id: string) => ({
+    ...ctx.players.ref(id),
+    slot: slots[lineup.starters.indexOf(id)] ?? "FLEX",
+    pts: round(lineup.projected.get(id) ?? 0, 1),
+  });
+  return {
+    week: week.week,
+    now_starting: [...now].filter((id) => !was.has(id)).map((id) => describe(after, id)),
+    no_longer_starting: [...was].filter((id) => !now.has(id)).map((id) => describe(before, id)),
+    projected_before: round(lineupTotal(before), 1),
+    projected_after: round(lineupTotal(after), 1),
+  };
+}
+
+/** Warn when a move leaves a roster with more active players than it has room for. */
+function rosterSizeNotes(bundle: LeagueBundle, mine: Roster, move: ResolvedMove): string[] {
+  const room = (bundle.league.roster_positions ?? []).filter((slot) => slot !== "IR" && slot !== "TAXI").length;
+  if (!room) return [];
+  const notes: string[] = [];
+  for (const [rosterId, players] of move.players) {
+    const roster = bundle.rosters.find((r) => r.roster_id === rosterId);
+    const parked = new Set([...(roster?.reserve ?? []), ...(roster?.taxi ?? [])]);
+    const active = players.filter((id) => !parked.has(id)).length;
+    if (active <= room) continue;
+    notes.push(
+      rosterId === mine.roster_id
+        ? `${teamNameOf(bundle, rosterId)} would have ${active} players for ${room} active roster spots, so someone has to be dropped; list them under drop to include that.`
+        : `${teamNameOf(bundle, rosterId)} would have ${active} players for ${room} active roster spots and has to drop someone, which this simulation leaves out.`,
+    );
+  }
+  return notes;
+}
+
+interface Lineup {
+  starters: (string | null)[];
+  projected: Map<string, number>;
+}
+
+/** A roster's best projected lineup for one week; `players` replaces its player list. IR and taxi players never start. */
+function bestLineup(ctx: ServerContext, bundle: LeagueBundle, roster: Roster, projections: StatMap, players?: readonly string[]): Lineup {
   const scoring = bundle.league.scoring_settings;
   const unavailable = new Set([...(roster.reserve ?? []), ...(roster.taxi ?? [])]);
-  const candidates = (roster.players ?? []).filter((id) => !unavailable.has(id));
+  const candidates = (players ?? roster.players ?? []).filter((id) => !unavailable.has(id));
   const projected = new Map(candidates.map((id) => [id, scoreStatLine(projections[id] ?? null, scoring)]));
+  return { starters: optimalStarters(ctx, bundle.league, candidates, projected), projected };
+}
+
+function lineupTotal(lineup: Lineup): number {
+  return lineup.starters.reduce((sum, id) => sum + (id ? Math.max(0, lineup.projected.get(id) ?? 0) : 0), 0);
+}
+
+/** Projected score distribution for a roster's best lineup. */
+function projectedWeek(ctx: ServerContext, bundle: LeagueBundle, roster: Roster, projections: StatMap, players?: readonly string[]): ScoreDistribution {
+  const lineup = bestLineup(ctx, bundle, roster, projections, players);
   let mean = 0;
   let variance = 0;
-  for (const id of optimalStarters(ctx, bundle.league, candidates, projected)) {
-    const mu = id ? (projected.get(id) ?? 0) : 0;
+  for (const id of lineup.starters) {
+    const mu = id ? (lineup.projected.get(id) ?? 0) : 0;
     if (!id || mu <= 0) continue;
     const sd = spreadFor(ctx.players.ref(id).pos) * mu;
     mean += mu;
