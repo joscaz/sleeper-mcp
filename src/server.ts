@@ -23,7 +23,7 @@ Typical flow:
 1. get_user / get_user_leagues to turn a username into league_ids.
 2. get_league (settings) and get_league_standings (records + roster_id ↔ manager map).
 3. get_roster / get_matchups / get_transactions / get_free_agents / get_lineup_projections for the actual questions.
-4. get_matchup_odds ("am I going to win this week?", live during games) and get_playoff_odds ("will I make the playoffs?", "what do I need?").
+4. get_matchup_odds ("am I going to win this week?", live during games), get_playoff_odds ("will I make the playoffs?", "what do I need?") and get_move_impact ("does this trade or pickup help my playoff odds?").
 
 Notes:
 - Player ids are resolved to {id, name, pos, team, inj} everywhere; team defenses use team codes (e.g. "DET").
@@ -123,6 +123,7 @@ function registerPrompts(server: McpServer): void {
               "",
               "Use get_league (scoring, roster slots, waiver type/FAAB budget), get_roster (current depth, injuries, FAAB remaining),",
               "get_free_agents per position of need, get_trending_players (what the market is chasing) and get_projections for the upcoming week.",
+              "Check the top one or two claims with get_move_impact (add, plus drop when the roster is full) to see what each does to playoff odds.",
               "",
               "Recommend up to 5 claims ranked by priority, each with: who to add, who to drop, a suggested FAAB bid or waiver priority use, and a one-line reason.",
             ].join("\n"),
@@ -155,8 +156,9 @@ function registerPrompts(server: McpServer): void {
               "",
               "Use get_league (scoring format, league type, roster slots, trade deadline), get_roster for both teams, get_league_standings (contender vs rebuilder),",
               "get_projections (rest-of-season with week=0 where useful) and get_traded_picks if picks are involved.",
+              `Run get_move_impact for ${team_a} with the players each side gives and receives to see how the trade moves both teams' playoff odds.`,
               "",
-              "Cover: positional needs each side fills, starting-lineup impact, depth after the trade, dynasty/keeper value if applicable, and a verdict on who wins and whether each side should accept.",
+              "Cover: positional needs each side fills, starting-lineup impact, the playoff-odds change for each side, depth after the trade, dynasty/keeper value if applicable, and a verdict on who wins and whether each side should accept.",
             ].join("\n"),
           },
         },

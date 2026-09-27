@@ -139,6 +139,17 @@ describe("simulateSeason", () => {
     for (const t of r.teams) expect(t.avg_wins + t.avg_losses + t.avg_ties).toBeCloseTo(1, 9);
   });
 
+  it("with shared random draws, a stronger team only gains odds and the rest of the league gives them up", () => {
+    const teams = [team(1), team(2), team(3), team(4)];
+    const options = { simulations: 3000, seed: 99, playoffTeams: 2, byes: 0 };
+    const before = simulateSeason(teams, Array.from({ length: 6 }, (_, i) => week(i + 1, [100, 100, 100, 100])), options);
+    const after = simulateSeason(teams, Array.from({ length: 6 }, (_, i) => week(i + 1, [108, 100, 100, 100])), options);
+    const gain = after.teams[0]!.playoffs - before.teams[0]!.playoffs;
+    expect(gain).toBeGreaterThan(0);
+    const othersChange = [1, 2, 3].reduce((sum, i) => sum + after.teams[i]!.playoffs - before.teams[i]!.playoffs, 0);
+    expect(othersChange).toBeCloseTo(-gain, 9);
+  });
+
   it("breaks a team's odds down by this week's result and by final win total", () => {
     const teams = [team(1, 3, 3), team(2, 3, 3), team(3, 3, 3), team(4, 3, 3)];
     const weeks = Array.from({ length: 4 }, (_, i) => week(i + 6, [100, 100, 100, 100]));
