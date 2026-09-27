@@ -344,8 +344,11 @@ export const liveMatchupsWeek5: Matchup[] = [
   { roster_id: 4, matchup_id: 2, points: 0, custom_points: null, starters: [], players: [], players_points: {} },
 ];
 
-/** Box scores while ATL-NYJ is live: ATL has run 48 of a typical 64 offensive snaps; NYJ has no stat lines yet. */
-export const liveStatsWeek5: StatMap = { "9226": { rush_att: 9, rush_yd: 50, tm_off_snp: 48 } };
+/**
+ * Box scores while ATL-NYJ is live. Sleeper adds snap counts only after a game ends, so progress comes from plays:
+ * 16 between the two teams, about 13% of a typical game's 124, which leaves 87% of each projection.
+ */
+export const liveStatsWeek5: StatMap = { "9226": { rush_att: 9, rush_yd: 50 }, "8138": { rush_att: 7 } };
 
 /** Route table: path (without base) -> body. Query strings are matched exactly where present. */
 export function routes(): Record<string, unknown> {
