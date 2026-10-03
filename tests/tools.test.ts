@@ -451,18 +451,18 @@ describe("projections & stats", () => {
       expect(data!.points_so_far).toBe(54.1);
       const current = new Map((data!.current_lineup as Record<string, unknown>[]).map((p) => [p.name, p]));
       expect(current.get("Patrick Mahomes")).toMatchObject({ status: "final", scored: 24.1, pts: 24.1 });
-      // 10 scored, plus a quarter of a 20.8 projection (ATL has run 48 of ~64 snaps).
-      expect(current.get("Bijan Robinson")).toMatchObject({ status: "playing", scored: 10, pts: 15.2 });
+      // 10 scored, plus 87% of a 20.8 projection: ATL and NYJ have run 16 of a typical game's ~124 plays.
+      expect(current.get("Bijan Robinson")).toMatchObject({ status: "playing", scored: 10, pts: 28.12 });
       expect(current.get("Ja'Marr Chase")).toEqual(expect.objectContaining({ pts: 19.7 }));
       expect(current.get("Ja'Marr Chase")).not.toHaveProperty("status");
       expect(current.get("Jonathan Taylor")).toMatchObject({ status: "bye", pts: 0 });
-      expect(data!.current_projected_total).toBeCloseTo(88.95, 2);
+      expect(data!.current_projected_total).toBeCloseTo(114.91, 2);
 
       // Kelce's game is over, so LaPorta cannot replace him even though Kelce scored 0; Jefferson can still take Taylor's FLEX spot.
       const optimal = data!.optimal_lineup as Record<string, unknown>[];
       expect(optimal.find((p) => p.slot === "TE")).toMatchObject({ name: "Travis Kelce", status: "final" });
       expect(optimal.find((p) => p.slot === "FLEX")).toMatchObject({ name: "Justin Jefferson" });
-      expect(data!.optimal_projected_total).toBeCloseTo(108.45, 2);
+      expect(data!.optimal_projected_total).toBeCloseTo(134.41, 2);
       expect(data!.projected_gain).toBe(19.5);
       const changes = data!.suggested_changes as { start: Record<string, unknown>[]; sit: Record<string, unknown>[] };
       expect(changes.start.map((p) => p.name)).toEqual(["Justin Jefferson"]);
@@ -479,8 +479,8 @@ describe("projections & stats", () => {
     try {
       const { data } = await o.call("get_lineup_projections", { league_id: LEAGUE_ID, username: "alice" });
       const current = new Map((data!.current_lineup as Record<string, unknown>[]).map((p) => [p.name, p]));
-      // 50 rushing yards under league scoring = 5, plus a quarter of his 20.8 projection.
-      expect(current.get("Bijan Robinson")).toMatchObject({ status: "playing", scored: 5, pts: 10.2 });
+      // 50 rushing yards under league scoring = 5, plus 87% of his 20.8 projection.
+      expect(current.get("Bijan Robinson")).toMatchObject({ status: "playing", scored: 5, pts: 23.12 });
     } finally {
       await o.close();
     }
@@ -515,13 +515,13 @@ describe("odds", () => {
       const mine = await o.call("get_matchup_odds", { league_id: LEAGUE_ID, username: "alice" });
       const side = (mine.data!.matchups as OddsMatchup[])[0]!.teams[0]!;
       expect(side).toMatchObject({ team_name: "Alice's Avengers", points: 54.1, starters_left: 6 });
-      expect(side.projected).toBeCloseTo(108.45, 0);
+      expect(side.projected).toBeCloseTo(134.4, 0);
       const byName = new Map(side.starters!.map((s) => [s.name, s]));
       expect(byName.get("Patrick Mahomes")).toMatchObject({ status: "final", pts: 24.1, proj_left: 0 });
-      // Projected 20.8 under league scoring; ATL has run 48 of ~64 snaps, so a quarter of that is left.
-      expect(byName.get("Bijan Robinson")).toMatchObject({ status: "playing", pts: 10, proj_left: 5.2 });
-      // No NYJ box score yet: a live game with unknown progress counts as halfway.
-      expect(byName.get("Breece Hall")).toMatchObject({ status: "playing", proj_left: 6.7 });
+      // Projected 20.8 under league scoring. ATL and NYJ have run 16 plays between them, about 13% of a game, so 87% is left.
+      expect(byName.get("Bijan Robinson")).toMatchObject({ status: "playing", pts: 10, proj_left: 18.1 });
+      // Both teams run off the same clock, so Hall (NYJ) has the same 87% of his 13.4 projection left.
+      expect(byName.get("Breece Hall")).toMatchObject({ status: "playing", proj_left: 11.7 });
       expect(byName.get("Ja'Marr Chase")).toMatchObject({ status: "yet_to_play", pts: 0, proj_left: 19.7 });
       expect(byName.get("Travis Kelce")).toMatchObject({ status: "final", pts: 0, proj_left: 0 });
 
@@ -553,7 +553,10 @@ describe("odds", () => {
       const res = await o.call("get_matchup_odds", { league_id: LEAGUE_ID, username: "alice" });
       expect(res.data!.game_status_source).toBe("box_scores");
       const starters = (res.data!.matchups as OddsMatchup[])[0]!.teams[0]!.starters!;
-      expect(starters.find((s) => s.name === "Bijan Robinson")).toMatchObject({ status: "playing", proj_left: 5.2 });
+      // Without the schedule each team is measured by its own plays: ATL's 9 of ~62 leave 85% of Bijan's 20.8, and
+      // NYJ's 7 show its game is under way even though Sleeper has no snap counts for a live game.
+      expect(starters.find((s) => s.name === "Bijan Robinson")).toMatchObject({ status: "playing", proj_left: 17.8 });
+      expect(starters.find((s) => s.name === "Breece Hall")).toMatchObject({ status: "playing", proj_left: 11.9 });
       expect(starters.find((s) => s.name === "Ja'Marr Chase")?.status).toBe("yet_to_play");
     } finally {
       await o.close();
