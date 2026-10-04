@@ -94,7 +94,7 @@ export interface LiveWeek {
   scored: Map<string, number>;
 }
 
-async function loadLiveWeek(ctx: ServerContext, bundle: LeagueBundle, roster: Roster, week: number, state: NflState): Promise<LiveWeek> {
+export async function loadLiveWeek(ctx: ServerContext, bundle: LeagueBundle, roster: Roster, week: number, state: NflState): Promise<LiveWeek> {
   const season = bundle.league.season;
   const games = await loadWeekGames(ctx, season, week, state);
   const scored = new Map<string, number>();
@@ -190,7 +190,7 @@ async function statsOrProjections(ctx: ServerContext, kind: "stats" | "projectio
   };
 }
 
-function seasonTypeFor(state: NflState, season: string): string {
+export function seasonTypeFor(state: NflState, season: string): string {
   if (season !== state.season) return "regular";
   return state.season_type === "post" ? "regular" : state.season_type === "pre" ? "regular" : state.season_type;
 }

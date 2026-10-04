@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { SleeperGraphqlClient, SleeperGraphqlError, SLEEPER_GRAPHQL_URL, decodeTokenClaims } from "../src/sleeper/graphql.js";
 import { connectedClient } from "./helpers.js";
-import { LEAGUE_ID, transactionsWeek5 } from "./fixtures.js";
+import { LEAGUE_ID, SCHEDULE_URL, preKickoffSchedule2026, transactionsWeek5 } from "./fixtures.js";
 
 // ---------------------------------------------------------------------------
 // Fake Sleeper GraphQL endpoint
@@ -117,7 +117,10 @@ const pendingClaim = {
 type Connected = Awaited<ReturnType<typeof connectedClient>>;
 let c: Connected | undefined;
 
-async function connectWithAuth(handlers: Record<string, Handler> = {}, options: { allowWrites?: boolean; token?: string | null; email?: string; password?: string } = {}) {
+async function connectWithAuth(
+  handlers: Record<string, Handler> = {},
+  options: { allowWrites?: boolean; token?: string | null; email?: string; password?: string; routes?: Record<string, unknown> } = {},
+) {
   const gql = fakeGraphql({ me: () => ({ user_id: "111", username: "alice", display_name: "Alice", email: null }), ...handlers });
   const auth = new SleeperGraphqlClient({
     token: options.token === undefined ? fakeJwt() : options.token,
@@ -125,7 +128,7 @@ async function connectWithAuth(handlers: Record<string, Handler> = {}, options: 
     password: options.password,
     fetch: gql.fetch,
   });
-  c = await connectedClient({}, { auth, allowWrites: options.allowWrites });
+  c = await connectedClient(options.routes ?? {}, { auth, allowWrites: options.allowWrites });
   return { ...c, gql };
 }
 
@@ -330,6 +333,30 @@ describe("set_lineup", () => {
     expect(result.isError).toBe(true);
     expect(text).toContain("Sleeper refused the change");
     expect(text).toContain("Games have already started");
+  });
+});
+
+describe("check_lineups with a session", () => {
+  it("checks the logged-in manager's live lineup and its moves apply as-is with set_lineup", async () => {
+    // Sleeper's live store already has Breece Hall benched (empty RB slot); the public copy still starts him.
+    const live = { ...ROSTER_1, starters: ["4046", "9226", "0", "7564", "6794", "5850", "8112", "4195", "DET"] };
+    const { call, gql } = await connectWithAuth({ ...rosterEcho, league_rosters: () => [live] }, { routes: { [SCHEDULE_URL]: preKickoffSchedule2026 } });
+    const { data, result } = await call("check_lineups", {});
+    expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+    expect(data!.user_id).toBe("111");
+    expect(data!.note).toBeUndefined();
+    expect(data!.next_step).toMatch(/set_lineup/);
+    const [report] = data!.leagues as { problems: { slot: string; issue: string; replacement: { name: string } }[]; set_lineup: Record<string, unknown> }[];
+    expect(report!.problems.map((p) => [p.slot, p.issue, p.replacement.name])).toEqual([
+      ["RB", "empty", "Jonathan Taylor"],
+      ["TE", "out", "Sam LaPorta"],
+    ]);
+    expect(report!.set_lineup).toEqual({ league_id: LEAGUE_ID, moves: [{ start: "6813", slot: "RB" }, { start: "9509", bench: "5850" }] });
+    expect(gql.calls.filter((x) => x.op === "roster_update_starters")).toHaveLength(0);
+
+    const applied = await call("set_lineup", report!.set_lineup);
+    expect(applied.result.isError, JSON.stringify(applied.result.content)).toBeFalsy();
+    expect(gql.last("roster_update_starters")!.vars.starters).toEqual(["4046", "9226", "6813", "7564", "6794", "9509", "8112", "4195", "DET"]);
   });
 });
 
