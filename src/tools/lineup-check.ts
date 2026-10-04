@@ -168,6 +168,10 @@ async function checkLeague(ctx: ServerContext, league: League, userId: string, w
   }
 
   const roster = await freshenRoster(ctx, bundle, own);
+  // Guillotine ("chopped") leagues empty an eliminated team's roster: every slot is empty and nothing can be fixed.
+  if (!(roster.players ?? []).length) {
+    return { league_id: league.league_id, league: league.name, reason: "roster has no players (eliminated from a guillotine league, or not filled yet)" };
+  }
   const live = await loadLiveWeek(ctx, bundle, roster, week, state);
   const analysis = lineupAnalysis(ctx, bundle, roster.roster_id, roster.players ?? [], roster.starters ?? [], projections, week, live);
 

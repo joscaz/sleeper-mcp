@@ -596,6 +596,17 @@ describe("check_lineups", () => {
     }
   });
 
+  it("skips a roster with no players, like a team chopped from a guillotine league", async () => {
+    const o = await connectedClient({ "/user/333/leagues/nfl/2026": [league] });
+    try {
+      const { data } = await o.call("check_lineups", { username: "carol" });
+      expect(data!.leagues_checked).toBe(0);
+      expect(data!.skipped).toEqual([{ league_id: LEAGUE_ID, league: "Test Dynasty", reason: "roster has no players (eliminated from a guillotine league, or not filled yet)" }]);
+    } finally {
+      await o.close();
+    }
+  });
+
   it("skips a playoff week where the team has no matchup", async () => {
     const o = await connectedClient({
       "/projections/nfl/regular/2026/15": projectionsWeek5,
