@@ -8,6 +8,7 @@ import { registerTransactionTools } from "./tools/transactions.js";
 import { registerDraftTools } from "./tools/drafts.js";
 import { registerPlayerTools } from "./tools/players.js";
 import { registerStatTools } from "./tools/stats.js";
+import { registerLineupCheckTools } from "./tools/lineup-check.js";
 import { registerOddsTools } from "./tools/odds.js";
 import { registerAccountTools } from "./tools/account.js";
 
@@ -23,7 +24,8 @@ Typical flow:
 1. get_user / get_user_leagues to turn a username into league_ids.
 2. get_league (settings) and get_league_standings (records + roster_id ↔ manager map).
 3. get_roster / get_matchups / get_transactions / get_free_agents / get_lineup_projections for the actual questions.
-4. get_matchup_odds ("am I going to win this week?", live during games), get_playoff_odds ("will I make the playoffs?", "what do I need?") and get_move_impact ("does this trade or pickup help my playoff odds?").
+4. check_lineups ("are any of my lineups broken this week?") scans every league at once: empty slots, byes, ruled-out starters, with set_lineup-ready fixes.
+5. get_matchup_odds ("am I going to win this week?", live during games), get_playoff_odds ("will I make the playoffs?", "what do I need?") and get_move_impact ("does this trade or pickup help my playoff odds?").
 
 Notes:
 - Player ids are resolved to {id, name, pos, team, inj} everywhere; team defenses use team codes (e.g. "DET").
@@ -54,6 +56,7 @@ export function createServer(options: CreateServerOptions = {}): { server: McpSe
   registerDraftTools(server, ctx);
   registerPlayerTools(server, ctx);
   registerStatTools(server, ctx);
+  registerLineupCheckTools(server, ctx);
   registerOddsTools(server, ctx);
   registerAccountTools(server, ctx);
   registerPrompts(server);

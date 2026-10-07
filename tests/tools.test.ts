@@ -41,6 +41,7 @@ describe("server surface", () => {
         "get_league_history",
         "get_league_rosters",
         "get_league_standings",
+        "check_lineups",
         "get_lineup_projections",
         "get_matchup_odds",
         "get_matchups",
@@ -489,6 +490,144 @@ describe("projections & stats", () => {
   it("get_lineup_projections warns about empty slots", async () => {
     const { data } = await c.call("get_lineup_projections", { league_id: LEAGUE_ID, roster_id: 2 });
     expect((data!.warnings as string[]).filter((w) => w.startsWith("Empty")).length).toBe(7);
+  });
+});
+
+describe("check_lineups", () => {
+  type Problem = { slot: string; issue: string; impact: string; detail: string; player: { id: string } | null; replacement: { id: string; name: string } | null; no_replacement?: string };
+  type Report = { league_id: string; team: string; status: string; optimal_gain: number; problems?: Problem[]; set_lineup?: { league_id: string; moves: Record<string, string>[] } };
+  const leaguesOf = (data: Record<string, unknown> | undefined) => data!.leagues as Report[];
+
+  it("flags a ruled-out starter and suggests the healthy bench player who can fill his slot", async () => {
+    const o = await connectedClient({ [SCHEDULE_URL]: preKickoffSchedule2026 });
+    try {
+      const { data, result } = await o.call("check_lineups", { username: "alice" });
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      expect(data).toMatchObject({ user_id: "111", season: "2026", week: 5, leagues_checked: 1, needs_fix: 1, at_risk: 0, ok: 0, skipped: [] });
+      const [report] = leaguesOf(data);
+      expect(report).toMatchObject({ league_id: LEAGUE_ID, team: "Alice's Avengers (Alice)", status: "needs_fix" });
+      // Kelce (Out) is the only problem: Taylor is Questionable, which is not flagged, and he is on the bench anyway.
+      expect(report!.problems).toEqual([
+        expect.objectContaining({ slot: "TE", issue: "out", impact: "scores_zero", detail: "Travis Kelce is listed Out.", replacement: expect.objectContaining({ id: "9509", name: "Sam LaPorta" }) }),
+      ]);
+      expect(report!.set_lineup).toEqual({ league_id: LEAGUE_ID, moves: [{ start: "9509", bench: "5850" }] });
+      expect(report!.optimal_gain).toBeGreaterThan(0);
+      expect(data!.summary).toBe("1 starter slot(s) will score zero in 1 league(s), 1 fixable from the bench.");
+      expect(data!.next_step).toMatch(/SLEEPER_TOKEN/);
+      expect(data!.note).toMatch(/public API/);
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("skips starters whose game has kicked off and only suggests bench players still to play", async () => {
+    // Mid-Sunday: KC final (Kelce locked), ATL/NYJ live, IND on bye with Taylor in the FLEX, Jefferson (MIN, to come) on the bench.
+    const starters = ["4046", "9226", "8138", "7564", "8112", "5850", "6813", "4195", "DET"];
+    const o = await connectedClient({
+      [`/league/${LEAGUE_ID}/rosters`]: rosters.map((r) => (r.roster_id === 1 ? { ...r, starters } : r)),
+      [`/league/${LEAGUE_ID}/matchups/5`]: liveMatchupsWeek5,
+      "/stats/nfl/regular/2026/5": liveStatsWeek5,
+    });
+    try {
+      const { data } = await o.call("check_lineups", { username: "alice" });
+      const [report] = leaguesOf(data);
+      expect(report!.problems).toEqual([
+        expect.objectContaining({ slot: "FLEX", issue: "bye", detail: "Jonathan Taylor is on bye.", replacement: expect.objectContaining({ name: "Justin Jefferson" }) }),
+      ]);
+      expect(report!.set_lineup!.moves).toEqual([{ start: "6794", bench: "6813" }]);
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("reports empty slots it cannot fill when the bench is empty", async () => {
+    const o = await connectedClient({ "/user/222/leagues/nfl/2026": [league] });
+    try {
+      const { data } = await o.call("check_lineups", { username: "bob" });
+      const [report] = leaguesOf(data);
+      expect(report!.status).toBe("needs_fix");
+      expect(report!.problems!.map((p) => p.issue)).toEqual(Array(7).fill("empty"));
+      expect(report!.problems!.every((p) => p.replacement === null && /get_free_agents/.test(p.no_replacement ?? ""))).toBe(true);
+      expect(report!.set_lineup).toBeUndefined();
+      expect(data!.next_step).toBeUndefined();
+      expect(data!.summary).toBe("7 starter slot(s) will score zero in 1 league(s), 0 fixable from the bench.");
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("says when every lineup is set", async () => {
+    const starters = ["4046", "9226", "8138", "7564", "6794", "9509", "8112", "4195", "DET"];
+    const o = await connectedClient({
+      [SCHEDULE_URL]: preKickoffSchedule2026,
+      [`/league/${LEAGUE_ID}/rosters`]: rosters.map((r) => (r.roster_id === 1 ? { ...r, starters } : r)),
+    });
+    try {
+      const { data } = await o.call("check_lineups", { username: "alice" });
+      expect(data).toMatchObject({ needs_fix: 0, at_risk: 0, ok: 1, summary: "All 1 lineup(s) are set: no empty slots, byes or ruled-out starters." });
+      expect(leaguesOf(data)[0]!.problems).toBeUndefined();
+      expect(data!.next_step).toBeUndefined();
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("skips best ball leagues, leagues outside the season, and league_ids the manager is not in", async () => {
+    const bestBall = { ...league, league_id: "1000000000000000009", name: "Best Ball Bash", settings: { ...league.settings, best_ball: 1 } };
+    const nextYear = { ...league, league_id: "1000000000000000008", name: "Startup", status: "pre_draft" };
+    const o = await connectedClient({ [SCHEDULE_URL]: preKickoffSchedule2026, "/user/111/leagues/nfl/2026": [league, bestBall, nextYear] });
+    try {
+      let { data } = await o.call("check_lineups", { username: "alice" });
+      expect(data!.leagues_checked).toBe(1);
+      expect(data!.skipped).toEqual([
+        { league_id: bestBall.league_id, league: "Best Ball Bash", reason: "best ball league: Sleeper sets the lineup automatically" },
+        { league_id: nextYear.league_id, league: "Startup", reason: "has not drafted yet" },
+      ]);
+
+      ({ data } = await o.call("check_lineups", { username: "alice", league_ids: [bestBall.league_id, "42"] }));
+      expect(data!.leagues_checked).toBe(0);
+      expect(data!.summary).toBe("No in-season leagues to check.");
+      expect(data!.skipped).toEqual([
+        { league_id: "42", league: null, reason: "not one of this manager's 2026 leagues" },
+        expect.objectContaining({ league_id: bestBall.league_id }),
+      ]);
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("skips a roster with no players, like a team chopped from a guillotine league", async () => {
+    const o = await connectedClient({ "/user/333/leagues/nfl/2026": [league] });
+    try {
+      const { data } = await o.call("check_lineups", { username: "carol" });
+      expect(data!.leagues_checked).toBe(0);
+      expect(data!.skipped).toEqual([{ league_id: LEAGUE_ID, league: "Test Dynasty", reason: "roster has no players (eliminated from a guillotine league, or not filled yet)" }]);
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("skips a playoff week where the team has no matchup", async () => {
+    const o = await connectedClient({
+      "/projections/nfl/regular/2026/15": projectionsWeek5,
+      [`/league/${LEAGUE_ID}/matchups/15`]: [
+        { roster_id: 1, matchup_id: null, points: 0, custom_points: null, starters: [], players: [] },
+        { roster_id: 2, matchup_id: 1, points: 0, custom_points: null, starters: [], players: [] },
+      ],
+    });
+    try {
+      const { data } = await o.call("check_lineups", { username: "alice", week: 15 });
+      expect(data!.leagues_checked).toBe(0);
+      expect(data!.skipped).toEqual([{ league_id: LEAGUE_ID, league: "Test Dynasty", reason: "no matchup in week 15 (eliminated or on a playoff bye)" }]);
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("asks who to check when there is no user, default user or session", async () => {
+    const { result, text } = await c.call("check_lineups", {});
+    expect(result.isError).toBe(true);
+    expect(text).toMatch(/SLEEPER_USERNAME/);
   });
 });
 

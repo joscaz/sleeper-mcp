@@ -15,6 +15,7 @@ Ask Claude, Cursor, or any MCP client things like:
 - "Who did I draft in round 1 the last three years?"
 - "Am I going to win this week? What are my playoff odds, and how many wins do I need?"
 - "Would trading for Justin Jefferson actually raise my playoff odds? What about picking up a backup RB?"
+- "Are any of my lineups broken this week?" (one check across all your leagues: empty slots, byes, players ruled out)
 - "Move Jacobs to IR, start Corum, and put a claim in for Kaelon Black." *(with a Sleeper session, see [Account tools](#account-tools-optional-session))*
 
 No login, no API key for reads: Sleeper's public API covers everything above the "Account" line. Add your Sleeper session and the same server can also set lineups, manage IR/taxi, submit waiver claims and propose trades.
@@ -43,7 +44,7 @@ There are several community Sleeper MCP servers. This one focuses on the things 
 | Tests | 100+ unit + integration tests (in-memory and HTTP transports) plus a live smoke test | varies |
 | Tool annotations, `structuredContent`, prompts, resources | ✅ | partial |
 
-The 25 public-API tools are read-only and need no login. The 11 [account tools](#account-tools-optional-session) (2 private reads, 9 writes) are registered only when you configure a Sleeper session, and `--read-only` keeps the writes off even then.
+The 26 public-API tools are read-only and need no login. The 11 [account tools](#account-tools-optional-session) (2 private reads, 9 writes) are registered only when you configure a Sleeper session, and `--read-only` keeps the writes off even then.
 
 ## Quick start
 
@@ -167,6 +168,7 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 | `get_projections` | Weekly or season (`week=0`) projections. Filter by players/position/league/team. `scoring="league"` applies the league's exact `scoring_settings`. |
 | `get_player_stats` | Actual weekly/season fantasy production with the same filters and scoring options. |
 | `get_lineup_projections` | Start/sit for one team: current vs optimal lineup (respecting FLEX/SUPER_FLEX/IDP eligibility), suggested swaps, bye/injury/empty-slot warnings. Once games kick off, players whose game has started stay locked and count the points they have scored (plus a projection for the rest of a live game), so totals are projected finals and swaps only involve players still to play. |
+| `check_lineups` | Every in-season league a manager is in, checked in one call: starters who will score zero (empty slot, bye, no game, Out/IR/suspended) or are at risk (Doubtful, no projection). Each problem comes with the best healthy bench player who can fill that slot and has not played yet, and the zero-point fixes come back as `set_lineup` arguments per league. Players whose game has started are locked and skipped, best ball leagues and empty rosters (chopped from a guillotine league) are skipped, Questionable players are not flagged. |
 
 ### Odds & simulations
 
