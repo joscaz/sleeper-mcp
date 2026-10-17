@@ -143,8 +143,8 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 
 | Tool | What it returns |
 | --- | --- |
-| `get_roster` | One team: starters labeled with slots (QB, RB, FLEX…), bench, IR, taxi, record, FAAB. |
-| `get_league_rosters` | Every roster in the league (`include_bench=false` for a lighter payload). |
+| `get_roster` | One team: current weekly starters during an active season, labeled with slots (QB, RB, FLEX…), plus bench, IR, taxi, record, FAAB. Uses live weekly starters with a session; otherwise public matchup data, which can lag. |
+| `get_league_rosters` | Every roster in the league, including roster-default starters (`include_bench=false` for a lighter payload). Use `get_matchups` for weekly scoring lineups. |
 | `get_matchups` | Paired matchups for a week with scores, margin, leader, starters with per-player points (`include_bench` for bench points). Filter to one team. |
 | `get_playoff_bracket` | Winners/losers bracket with round labels ("Championship", "Semifinal", "Toilet bowl final"), teams and results. |
 
@@ -199,7 +199,7 @@ The quick-start client configurations explicitly disable writes. To enable them,
 | --- | --- |
 | `get_auth_status` | Who the session belongs to, how it was configured, token expiry, whether writes are enabled. Call it first to verify a token. |
 | `get_pending_transactions` | Open trade offers (sent/received, who still has to accept) and pending waiver claims for your team, with names resolved. `all_teams` / `include_finished` widen it. |. Looks at the current and previous week by default, since open claims and offers stay filed under the week they were created in.
-| `set_lineup` | Start/bench swaps (`moves: [{start, bench?}]`) or a full `starters` list. Checks slot eligibility (FLEX/SUPER_FLEX/IDP), IR/taxi status and duplicates before sending. |
+| `set_lineup` | Start/bench swaps (`moves: [{start, bench?}]`) or a full `starters` list. In season, reads and updates the current weekly matchup—not roster defaults—and verifies it independently. Checks slot eligibility, IR/taxi, duplicates, kickoff locks and week rollover. |
 | `update_ir` | Move players onto/off IR. A starter is benched first so the lineup stays valid; slot counts are enforced. |
 | `update_taxi` | Move players onto/off the taxi squad, same guarantees. `force` for commissioner overrides. Note: most leagues block taxi additions once the regular season starts, and Sleeper enforces that server-side. |
 | `add_drop_player` | Free-agent add and/or drop, refusing players who are already rostered. |
@@ -210,6 +210,10 @@ The quick-start client configurations explicitly disable writes. To enable them,
 | `post_league_message` | Post in the league chat (e.g. pitch a trade). |
 
 Write tools carry `readOnlyHint: false` so clients can ask for confirmation. Start with `--read-only` to keep the two private reads and drop every write tool even though a session exists.
+
+**Weekly lineup safety:** In-season `set_lineup` returns `week` and `verified: true` only after a separate authenticated read confirms the requested starters. Missing/malformed weekly data, a failed live roster read, or unavailable kickoff information stops the write rather than falling back to roster defaults. If a request was sent but cannot be verified, check Sleeper before retrying: a transport or read-back failure does not prove nothing changed. Dry runs never send mutations. Outside an active season, lineup changes still update roster defaults and do not claim weekly verification.
+
+IR/taxi moves that bench an in-season starter use the same weekly update and verification first. These are separate requests, not an atomic transaction: if the subsequent IR/taxi move fails, the error reports that the lineup already changed. Preflight checks catch observed concurrent lineup changes but cannot eliminate every race with another client.
 
 > **Heads-up:** the private API is undocumented and unsupported by Sleeper; field names and behaviour can change without notice. Use a session you are comfortable exposing to the machine running the server, and confirm each change in the Sleeper app the first few times.
 

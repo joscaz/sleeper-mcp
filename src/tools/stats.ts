@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadLeague, resolveRoster, resolveWeek, ToolError, type LeagueBundle, type ServerContext } from "../context.js";
 import { TTL } from "../sleeper/client.js";
+import { weeklyRoster } from "../lineups.js";
 import { isTeamDefense } from "../sleeper/players.js";
 import type { League, NflState, Roster, StatLine, StatMap } from "../sleeper/types.js";
 import { keyStats, num, round, scoreStatLine, SLOT_ELIGIBILITY, startingSlots } from "../format.js";
@@ -80,7 +81,7 @@ export function registerStatTools(server: McpServer, ctx: ServerContext): void {
         const { week: resolvedWeek, state } = await resolveWeek(ctx, week);
         const season = bundle.league.season;
         const [projections] = await Promise.all([ctx.client.getProjections("nfl", seasonTypeFor(state, season), season, resolvedWeek), ctx.players.ensureLoaded()]);
-        const roster = await resolveRoster(ctx, bundle, selector);
+        const roster = await weeklyRoster(ctx, bundle, await resolveRoster(ctx, bundle, selector), resolvedWeek);
         const live = await loadLiveWeek(ctx, bundle, roster, resolvedWeek, state);
         return lineupAnalysis(ctx, bundle, roster.roster_id, roster.players ?? [], roster.starters ?? [], projections, resolvedWeek, live);
       }),

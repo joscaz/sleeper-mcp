@@ -432,7 +432,7 @@ describe("projections & stats", () => {
       expect(changes.sit.map((p) => p.name)).toContain("Travis Kelce");
       expect(changes.start.map((p) => p.name)).toEqual(expect.arrayContaining(["Sam LaPorta", "Jonathan Taylor"]));
       expect(data!.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/Travis Kelce .*Out/)]));
-      expect(o.ff.calls.some((path) => path.includes("/matchups/"))).toBe(false);
+      expect(o.ff.calls.some((path) => path.includes("/matchups/"))).toBe(true);
     } finally {
       await o.close();
     }
@@ -443,7 +443,7 @@ describe("projections & stats", () => {
     const starters = ["4046", "9226", "8138", "7564", "8112", "5850", "6813", "4195", "DET"];
     const o = await connectedClient({
       [`/league/${LEAGUE_ID}/rosters`]: rosters.map((r) => (r.roster_id === 1 ? { ...r, starters } : r)),
-      [`/league/${LEAGUE_ID}/matchups/5`]: liveMatchupsWeek5,
+      [`/league/${LEAGUE_ID}/matchups/5`]: liveMatchupsWeek5.map((m) => (m.roster_id === 1 ? { ...m, starters } : m)),
       "/stats/nfl/regular/2026/5": liveStatsWeek5,
     });
     try {
@@ -476,7 +476,10 @@ describe("projections & stats", () => {
   });
 
   it("get_lineup_projections scores from box scores when Sleeper's matchup has no points yet", async () => {
-    const o = await connectedClient({ [`/league/${LEAGUE_ID}/matchups/5`]: [], "/stats/nfl/regular/2026/5": liveStatsWeek5 });
+    const o = await connectedClient({
+      [`/league/${LEAGUE_ID}/matchups/5`]: matchupsWeek5.map((m) => ({ ...m, players_points: {} })),
+      "/stats/nfl/regular/2026/5": liveStatsWeek5,
+    });
     try {
       const { data } = await o.call("get_lineup_projections", { league_id: LEAGUE_ID, username: "alice" });
       const current = new Map((data!.current_lineup as Record<string, unknown>[]).map((p) => [p.name, p]));
@@ -525,7 +528,7 @@ describe("check_lineups", () => {
     const starters = ["4046", "9226", "8138", "7564", "8112", "5850", "6813", "4195", "DET"];
     const o = await connectedClient({
       [`/league/${LEAGUE_ID}/rosters`]: rosters.map((r) => (r.roster_id === 1 ? { ...r, starters } : r)),
-      [`/league/${LEAGUE_ID}/matchups/5`]: liveMatchupsWeek5,
+      [`/league/${LEAGUE_ID}/matchups/5`]: liveMatchupsWeek5.map((m) => (m.roster_id === 1 ? { ...m, starters } : m)),
       "/stats/nfl/regular/2026/5": liveStatsWeek5,
     });
     try {
@@ -561,6 +564,7 @@ describe("check_lineups", () => {
     const o = await connectedClient({
       [SCHEDULE_URL]: preKickoffSchedule2026,
       [`/league/${LEAGUE_ID}/rosters`]: rosters.map((r) => (r.roster_id === 1 ? { ...r, starters } : r)),
+      [`/league/${LEAGUE_ID}/matchups/5`]: matchupsWeek5.map((m) => (m.roster_id === 1 ? { ...m, starters } : m)),
     });
     try {
       const { data } = await o.call("check_lineups", { username: "alice" });
