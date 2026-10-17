@@ -1,26 +1,25 @@
-name: Release
+name: Draft GitHub release
 
-# Publishes to npm and creates a GitHub release when a v* tag is pushed
-# (see "Releasing" in CONTRIBUTING.md). Needs an NPM_TOKEN repository secret
-# until npm trusted publishing is configured for the package.
+# Version tags validate the source and prepare a draft GitHub release.
+# No package registry publication; see "Releasing" in CONTRIBUTING.md.
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write # create the GitHub release
-  id-token: write # npm provenance attestation
+  contents: read
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the draft GitHub release
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-          registry-url: https://registry.npmjs.org
       - run: npm ci
       - name: Tag must match package.json version
         run: |
@@ -29,10 +28,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: GitHub release
-        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+      - name: CLI sanity
+        run: node dist/index.js --version
+      - name: Draft GitHub release
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "$GITHUB_REF_NAME" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

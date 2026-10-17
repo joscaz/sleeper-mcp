@@ -1,7 +1,6 @@
 # sleeper-mcp
 
 [![CI](https://github.com/joscaz/sleeper-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/joscaz/sleeper-mcp/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/%40joscaz%2Fsleeper-mcp)](https://www.npmjs.com/package/@joscaz/sleeper-mcp)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -48,11 +47,19 @@ The 26 public-API tools are read-only and need no login. The 11 [account tools](
 
 ## Quick start
 
-Requires Node.js 20+. There is nothing to install up front: MCP clients launch the server with `npx`, which fetches it from npm on first run. To check that it runs:
+Requires Git, Node.js 20+ and npm. **Install from source; this project is not currently distributed on npm.** npm is used below to install dependencies and build the local server, not to download a published `@joscaz/sleeper-mcp` package.
 
 ```bash
-npx -y @joscaz/sleeper-mcp --help
+git clone https://github.com/joscaz/sleeper-mcp.git
+cd sleeper-mcp
+npm ci
+npm run build
+node dist/index.js --help
 ```
+
+Keep the checkout: MCP clients launch its built `dist/index.js`. Replace `/absolute/path/to/sleeper-mcp` in the examples with its actual location. Use the full path to `node` too if your desktop client cannot find it on PATH. On Windows, use a path such as `C:/Users/you/sleeper-mcp/dist/index.js`.
+
+The examples use `--read-only`, so they cannot change your account even if session credentials are present. To enable account changes deliberately, see [Account tools](#account-tools-optional-session).
 
 ### Claude Desktop
 
@@ -62,8 +69,8 @@ npx -y @joscaz/sleeper-mcp --help
 {
   "mcpServers": {
     "sleeper": {
-      "command": "npx",
-      "args": ["-y", "@joscaz/sleeper-mcp"],
+      "command": "node",
+      "args": ["/absolute/path/to/sleeper-mcp/dist/index.js", "--read-only"],
       "env": { "SLEEPER_USERNAME": "your_sleeper_username" }
     }
   }
@@ -73,26 +80,24 @@ npx -y @joscaz/sleeper-mcp --help
 ### Claude Code
 
 ```bash
-claude mcp add sleeper -e SLEEPER_USERNAME=your_sleeper_username -- npx -y @joscaz/sleeper-mcp
+claude mcp add sleeper -e SLEEPER_USERNAME=your_sleeper_username -- node /absolute/path/to/sleeper-mcp/dist/index.js --read-only
 ```
 
 ### Cursor / Windsurf / other stdio clients
 
-Same shape: command `npx`, args `["-y", "@joscaz/sleeper-mcp"]`, env `SLEEPER_USERNAME`.
+Same shape: command `node`, args `["/absolute/path/to/sleeper-mcp/dist/index.js", "--read-only"]`, env `SLEEPER_USERNAME`.
 
-### From source
+### Updating your checkout
 
-To run a local checkout instead (to hack on it, or to try unreleased changes):
+From a clean checkout on the branch you want to follow:
 
 ```bash
-git clone https://github.com/joscaz/sleeper-mcp.git
-cd sleeper-mcp
-npm install
+git pull --ff-only
+npm ci
 npm run build
-node dist/index.js --help
 ```
 
-Then use command `node` with args `["/absolute/path/to/sleeper-mcp/dist/index.js"]` in any of the configs above.
+Restart your MCP client afterwards. If you have local changes or a detached release tag, choose how to preserve or update those before pulling.
 
 ### Make it yours
 
@@ -101,17 +106,23 @@ Sleeper's API is public and read-only, so there is no login step: every league, 
 ### Remote / hosted (Streamable HTTP)
 
 ```bash
-SLEEPER_MCP_AUTH_TOKEN=change-me npx -y @joscaz/sleeper-mcp --http --port 3000
+node dist/index.js --http --host 127.0.0.1 --port 3000 --read-only
 # MCP endpoint:  http://localhost:3000/mcp   (POST, JSON-RPC)
 # Health check:  http://localhost:3000/healthz
 ```
 
-Clients connect with the URL `http://host:3000/mcp` and, if a token is set, the header `Authorization: Bearer change-me`. When a Sleeper session is configured with write tools enabled, the token is mandatory unless the server is bound to loopback (`--host 127.0.0.1`): anyone who can reach an unauthenticated `/mcp` could otherwise change your lineups, drop players and send trades. The server refuses to start in that configuration. This works for Replit, Claude's remote MCP connectors, and anything else that speaks Streamable HTTP. The server is stateless (no sessions), so it can sit behind a load balancer or run on serverless platforms.
+This example listens only on your own machine. For remote hosting, configure `SLEEPER_MCP_AUTH_TOKEN` through your host's secret manager, use `--host 0.0.0.0`, and put HTTPS in front of the service. Configure the same bearer credential securely in your MCP client. Not every remote MCP client supports static bearer authentication; check your client's requirements.
+
+When a Sleeper session is configured with write tools enabled, the bearer token is mandatory unless the server is bound to loopback: anyone who can reach an unauthenticated `/mcp` could otherwise change your lineups, drop players and send trades. The server refuses to start in that configuration unless the explicit insecure override is set. Bearer authentication is also recommended for remote read-only account access, which can expose private pending transactions. See [SECURITY.md](SECURITY.md).
+
+Build Docker locally from the checkout; no published container image is required. With `SLEEPER_MCP_AUTH_TOKEN` already set securely in your environment:
 
 ```bash
 docker build -t sleeper-mcp .
-docker run -p 3000:3000 -e SLEEPER_MCP_AUTH_TOKEN=change-me -v sleeper-cache:/data sleeper-mcp
+docker run --rm -p 127.0.0.1:3000:3000 -e SLEEPER_MCP_AUTH_TOKEN -v sleeper-cache:/data sleeper-mcp node dist/index.js --http --read-only
 ```
+
+The port is exposed only to the host by default. Use your hosting platform's private ingress or HTTPS configuration for remote access. Neither command publishes an image.
 
 ## Tools
 
@@ -182,6 +193,8 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 
 Registered only when a Sleeper session is configured (`SLEEPER_TOKEN`, or `SLEEPER_EMAIL` + `SLEEPER_PASSWORD`). They talk to Sleeper's **private GraphQL API** (`https://sleeper.com/graphql`), the same one the web app uses. Every tool that changes the account takes `dry_run=true` to validate and preview first, resolves player names for you, and re-reads the roster afterwards so you see the result. "My team" is the roster owned by the logged-in user; pass `roster_id` to act on another one (co-owners/commissioners).
 
+The quick-start client configurations explicitly disable writes. To enable them, configure the session securely and remove `--read-only`; also ensure `SLEEPER_MCP_READ_ONLY` is not enabled. These tools can affect your real account: preview with `dry_run=true`, require confirmation in your MCP client, and verify changes in Sleeper.
+
 | Tool | What it does |
 | --- | --- |
 | `get_auth_status` | Who the session belongs to, how it was configured, token expiry, whether writes are enabled. Call it first to verify a token. |
@@ -239,7 +252,7 @@ CLI flags: `--http`, `--port <n>`, `--host <addr>`, `--user <name>`, `--read-onl
 ## Development
 
 ```bash
-npm install
+npm ci
 npm run dev            # stdio server via tsx
 npm run dev:http       # HTTP on :3000
 npm test               # vitest (unit + in-memory MCP + HTTP integration)
@@ -264,10 +277,12 @@ tests/                Fixtures + fake fetch; no network needed
 scripts/smoke.ts      Live end-to-end check
 ```
 
-### Using the client library directly
+### Using the client library from a checkout
+
+After building, run this as an ES module from the checkout root (for example in a local `.mjs` script):
 
 ```ts
-import { SleeperClient } from "@joscaz/sleeper-mcp/client";
+import { SleeperClient } from "./dist/sleeper/client.js";
 
 const sleeper = new SleeperClient();
 const state = await sleeper.getNflState();
@@ -280,12 +295,9 @@ Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers 
 
 ## Releasing
 
-```bash
-npm version minor        # bumps package.json and tags vX.Y.Z
-git push --follow-tags   # the Release workflow publishes to npm and creates the GitHub release
-```
+Distribution is source-first. npm publication is intentionally disabled with `"private": true` in `package.json`; this does not make the GitHub repository private.
 
-See the "Releasing" section of CONTRIBUTING.md for the one-time npm setup.
+After a maintainer explicitly pushes a version tag, the release workflow validates the source and creates a **draft GitHub release** for review. It does not publish to npm or upload a container image. See [Releasing in CONTRIBUTING.md](CONTRIBUTING.md#releasing-maintainers) for the version/tag procedure.
 
 ## Credits & license
 

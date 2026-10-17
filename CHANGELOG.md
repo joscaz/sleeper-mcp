@@ -20,7 +20,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
-- The README leads with `npx -y @joscaz/sleeper-mcp` for every client, keeps a source checkout as the alternative, and no longer says every tool is read-only now that the optional account tools exist. The npm package description mentions the account tools too.
+- Source-first distribution: documented local builds and Docker replace unavailable npm install instructions and the npm badge. `package.json` is private to prevent accidental npm publication. Version tags now validate the source and create draft GitHub releases only, without npm publication or registry credentials.
+- Contributor guidance, security policy, and issue templates now describe optional session-backed account tools, read-only mode, dry runs, and safe handling of credentials and account data.
+- The README and package description distinguish public read-only tools from optional account tools.
 
 ### Fixed
 
@@ -28,15 +30,14 @@ All notable changes to this project are documented here. The format follows [Kee
 - `get_lineup_projections` counts the points a player has already scored once his game kicks off (plus a projection for the rest of a live game) and keeps him locked in his slot, as Sleeper does. It used to score everyone with their pre-game projection all week, so after Thursday night the totals ignored what had already happened, and it could suggest benching a starter whose game was over or starting a bench player who had already played. Starters on bye now get an explicit "is on bye" warning when the schedule shows it.
 - `get_free_agents` flags players who can't be picked up right now: `availability: "locked"` once their NFL game this week has kicked off, and `availability: "on_waivers"` (with `dropped_at`) for players dropped in the league within its waiver period (`waiver_clear_days`, default 2). `addable_only=true` hides both. The list used to present them as available, including a player who had already played on Thursday night or one dropped an hour earlier.
 
-## [0.1.0] - 2026-09-11
+## 0.1.0 - 2026-09-11
 
 ### Added
 
-- Initial release: 22 read-only tools covering leagues, standings, rosters, matchups, transactions, waivers, trades, drafts, players, free agents, projections and stats, with player IDs resolved to names everywhere.
+- Initial source version: 22 read-only tools covering leagues, standings, rosters, matchups, transactions, waivers, trades, drafts, players, free agents, projections and stats, with player IDs resolved to names everywhere.
 - 3 prompts (start/sit, trade review, waiver targets) and 2 resources (league summary, NFL state).
 - stdio and stateless Streamable HTTP transports, optional bearer auth, health check and CORS.
 - TTL response cache, 600 requests/minute limiter with retries, and a memory + disk cache for the Sleeper player database.
 - League-aware scoring for projections and lineup optimisation.
 
-[Unreleased]: https://github.com/joscaz/sleeper-mcp/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/joscaz/sleeper-mcp/releases/tag/v0.1.0
+[Unreleased]: https://github.com/joscaz/sleeper-mcp/commits/main
