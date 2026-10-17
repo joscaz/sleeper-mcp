@@ -12,6 +12,7 @@ import { SLOT_ELIGIBILITY, teamLabel } from "../format.js";
 import { isTeamDefense, type PlayerRef } from "../sleeper/players.js";
 import type { League, Matchup, NflState, StatMap } from "../sleeper/types.js";
 import { freshenRoster } from "./account.js";
+import { weeklyRoster } from "../lineups.js";
 import { lineupAnalysis, loadLiveWeek, seasonTypeFor } from "./stats.js";
 import { guard, userIdSchema, usernameSchema, weekSchema } from "./shared.js";
 
@@ -167,11 +168,12 @@ async function checkLeague(ctx: ServerContext, league: League, userId: string, w
     }
   }
 
-  const roster = await freshenRoster(ctx, bundle, own);
+  let roster = await freshenRoster(ctx, bundle, own);
   // Guillotine ("chopped") leagues empty an eliminated team's roster: every slot is empty and nothing can be fixed.
   if (!(roster.players ?? []).length) {
     return { league_id: league.league_id, league: league.name, reason: "roster has no players (eliminated from a guillotine league, or not filled yet)" };
   }
+  roster = await weeklyRoster(ctx, bundle, roster, week);
   const live = await loadLiveWeek(ctx, bundle, roster, week, state);
   const analysis = lineupAnalysis(ctx, bundle, roster.roster_id, roster.players ?? [], roster.starters ?? [], projections, week, live);
 

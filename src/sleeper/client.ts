@@ -318,8 +318,9 @@ export class SleeperClient {
   }
 
   /** Every NFL game of a season with its week, teams and live status (pre_game / in_game / complete). */
-  async getSchedule(sport: Sport, seasonType: string, season: string): Promise<ScheduleGame[]> {
+  async getSchedule(sport: Sport, seasonType: string, season: string, fresh = false): Promise<ScheduleGame[]> {
     const url = `${this.origin}/schedule/${sport}/${seasonType}/${enc(season)}`;
+    if (fresh) this.cache.delete(`GET ${url}`);
     return (await this.get<ScheduleGame[]>(url, { ttlMs: TTL.schedule, nullable: true })) ?? [];
   }
 

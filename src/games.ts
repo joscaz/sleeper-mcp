@@ -49,12 +49,12 @@ export function weekIsOver(season: string, week: number, state: NflState): boole
   return state.season_type === "regular" && week < state.week;
 }
 
-export async function loadWeekGames(ctx: ServerContext, season: string, week: number, state: NflState): Promise<WeekGames> {
+export async function loadWeekGames(ctx: ServerContext, season: string, week: number, state: NflState, freshSchedule = false): Promise<WeekGames> {
   if (weekIsOver(season, week, state)) return { game: () => FINAL, source: "past_week" };
 
   let schedule: ScheduleGame[] = [];
   try {
-    schedule = await ctx.client.getSchedule("nfl", "regular", season);
+    schedule = await ctx.client.getSchedule("nfl", "regular", season, freshSchedule);
   } catch (err) {
     ctx.log(`NFL schedule unavailable (${(err as Error).message}); falling back to box scores`);
   }

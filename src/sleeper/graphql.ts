@@ -54,6 +54,18 @@ export interface GqlRoster {
   metadata: Record<string, unknown> | null;
 }
 
+/** A scoring-week lineup, distinct from the roster's default starters. */
+export interface GqlMatchupLeg {
+  league_id: string;
+  roster_id: number;
+  matchup_id: number | null;
+  round: number;
+  leg: number;
+  starters: string[] | null;
+}
+
+const MATCHUP_LEG_FIELDS = "league_id roster_id matchup_id round leg starters";
+
 export interface GqlTransaction {
   transaction_id: string;
   type: string;
@@ -342,7 +354,25 @@ export class SleeperGraphqlClient {
     );
   }
 
-  /** Replace the full starters array (league slot order; "0" marks an empty slot). */
+  /** Uncached scoring lineups. NFL clients query the scoring week as round. */
+  matchupLegs(leagueId: string, round: number): Promise<GqlMatchupLeg[] | null> {
+    return this.execute<GqlMatchupLeg[] | null>(
+      "matchup_legs",
+      `query matchup_legs($league_id: Snowflake!, $round: Int!) { matchup_legs(league_id: $league_id, round: $round) { ${MATCHUP_LEG_FIELDS} } }`,
+      { league_id: leagueId, round },
+    );
+  }
+
+  /** Update one weekly scoring lineup, not the roster defaults. Never uses the commissioner force mutation. */
+  updateMatchupStarters(leagueId: string, rosterId: number, round: number, leg: number, starters: string[]): Promise<GqlMatchupLeg | null> {
+    return this.execute<GqlMatchupLeg | null>(
+      "update_matchup_leg",
+      `mutation update_matchup_leg($league_id: Snowflake!, $roster_id: Int!, $round: Int!, $leg: Int!, $starters: [String]) { update_matchup_leg(league_id: $league_id, roster_id: $roster_id, round: $round, leg: $leg, starters: $starters) { ${MATCHUP_LEG_FIELDS} } }`,
+      { league_id: leagueId, roster_id: rosterId, round, leg, starters },
+    );
+  }
+
+  /** Replace roster-default starters outside an active season; not the weekly scoring lineup. */
   updateStarters(leagueId: string, rosterId: number, starters: string[]): Promise<GqlRoster> {
     return this.execute<GqlRoster>(
       "roster_update_starters",
