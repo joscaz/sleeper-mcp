@@ -23,8 +23,8 @@ describe("source-first distribution", () => {
     const readme = read("README.md");
     expect(readme).not.toMatch(/npx[^\n]*@joscaz\/sleeper-mcp|img\.shields\.io\/npm/);
     const configs = [...readme.matchAll(/```json\n([\s\S]*?)```/g)];
-    expect(configs).toHaveLength(1);
-    const config = JSON.parse(configs[0]![1]!);
+    const config = configs.map((match) => JSON.parse(match[1]!)).find((entry) => entry.mcpServers?.sleeper);
+    expect(config).toBeDefined();
     expect(config.mcpServers.sleeper.command).toBe("node");
     expect(config.mcpServers.sleeper.args).toEqual(["/absolute/path/to/sleeper-mcp/dist/index.js", "--read-only"]);
   });

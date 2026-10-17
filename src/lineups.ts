@@ -1,6 +1,6 @@
 import { ToolError, type LeagueBundle, type ServerContext } from "./context.js";
 import { startingSlots } from "./format.js";
-import { hasKickedOff, loadWeekGames, nflTeam } from "./games.js";
+import { hasKickedOff, loadWeekGames, nflTeam, type WeekGames } from "./games.js";
 import type { GqlMatchupLeg } from "./sleeper/graphql.js";
 import type { Roster } from "./sleeper/types.js";
 
@@ -66,6 +66,11 @@ export function invalidateWeeklyLineup(ctx: ServerContext, leagueId: string, wee
 export async function validateLineupLocks(ctx: ServerContext, bundle: LeagueBundle, roster: Roster, week: number, next: string[]): Promise<void> {
   const state = await ctx.client.getNflState("nfl");
   const games = await loadWeekGames(ctx, bundle.league.season, week, state, true);
+  validateLineupLocksFromSnapshot(ctx, bundle, roster, next, games);
+}
+
+/** Pure lock validation, shared by real changes and read-only hypothetical comparisons. */
+export function validateLineupLocksFromSnapshot(ctx: ServerContext, bundle: LeagueBundle, roster: Roster, next: string[], games: WeekGames): void {
   if (games.source !== "schedule") throw new ToolError("Cannot verify kickoff locks without the NFL schedule; no lineup change was sent.");
   const current = startersFor(bundle, roster.starters);
   const moved = new Set([...current, ...next].filter((id) => id !== "0" && current.indexOf(id) !== next.indexOf(id)));

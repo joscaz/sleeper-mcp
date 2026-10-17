@@ -43,6 +43,7 @@ describe("server surface", () => {
         "get_league_rosters",
         "get_league_standings",
         "check_lineups",
+        "compare_lineups",
         "get_lineup_projections",
         "get_matchup_odds",
         "get_matchups",
