@@ -75,6 +75,25 @@ describe("PlayerStore", () => {
     const s = new PlayerStore(testClient(failing), { cacheDir: dir, now: () => Date.now() + 72 * 60 * 60_000 });
     await s.ensureLoaded();
     expect(s.ref("4046").name).toBe("Patrick Mahomes");
+    expect(s.freshness.stale).toBe(true);
+    expect(s.freshness.refresh_error).toMatch(/previous disk snapshot/);
+    const saved = JSON.parse(await readFile(path.join(dir, "players-nfl.json"), "utf8"));
+    expect(s.freshness.retrieved_at).toBe(new Date(saved.savedAt).toISOString());
+  });
+
+  it("exposes snapshot freshness and bypasses the client cache on an explicit refresh", async () => {
+    let now = Date.parse("2026-10-17T18:00:00Z");
+    const ff = fakeFetch();
+    const s = await store(ff, null, () => now);
+    expect(s.freshness).toMatchObject({ retrieved_at: new Date(now).toISOString(), stale: false, refresh_error: null });
+    const map = Object.fromEntries(s.all().map((p) => [p.player_id, p]));
+    map["4046"] = { ...map["4046"]!, injury_status: "Out" };
+    ff.set("/players/nfl", map);
+    now += 1000;
+    await s.refresh();
+    expect(ff.calls.filter((p) => p === "/players/nfl")).toHaveLength(2);
+    expect(s.ref("4046").inj).toBe("Out");
+    expect(s.freshness.retrieved_at).toBe(new Date(now).toISOString());
   });
 
   it("normalizes names", () => {

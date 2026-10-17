@@ -30,6 +30,8 @@ Environment:
                               Required for --http when a Sleeper session has writes enabled and the
                               bind address is not loopback (SLEEPER_MCP_INSECURE_NO_AUTH=1 overrides)
   SLEEPER_MCP_CACHE_DIR       Where to cache the player database (default: ~/.cache/sleeper-mcp)
+  SLEEPER_MCP_INJURY_SOURCE   sleeper (default) or espn (optional read-only injury enrichment)
+  SLEEPER_MCP_INJURY_TTL_SECONDS  ESPN snapshot cache / retry window (default: 300; 60–3600)
   PORT, HOST                  HTTP defaults
 `;
 
@@ -103,6 +105,14 @@ export function parseArgs(argv: string[]): CliArgs {
   return args;
 }
 
+export function injuryOptions(env: Record<string, string | undefined>): { injurySource: "sleeper" | "espn"; injuryCacheTtlMs: number } {
+  const injurySource = env.SLEEPER_MCP_INJURY_SOURCE?.trim() || "sleeper";
+  if (injurySource !== "sleeper" && injurySource !== "espn") throw new Error("SLEEPER_MCP_INJURY_SOURCE must be sleeper or espn.");
+  const seconds = Number(env.SLEEPER_MCP_INJURY_TTL_SECONDS ?? 300);
+  if (!Number.isInteger(seconds) || seconds < 60 || seconds > 3600) throw new Error("SLEEPER_MCP_INJURY_TTL_SECONDS must be an integer from 60 to 3600.");
+  return { injurySource, injuryCacheTtlMs: seconds * 1000 };
+}
+
 async function main(): Promise<void> {
   let args: CliArgs;
   try {
@@ -127,9 +137,10 @@ async function main(): Promise<void> {
   const sleeperPassword = process.env.SLEEPER_PASSWORD || null;
   const allowWrites = !(args.readOnly || /^(1|true|yes)$/i.test(process.env.SLEEPER_MCP_READ_ONLY ?? ""));
   const session = { sleeperToken, sleeperEmail, sleeperPassword, allowWrites };
+  const injuries = injuryOptions(process.env);
 
   if (args.http) {
-    const running = await startHttpServer({ host: args.host, port: args.port, preloadPlayers: args.preload, cacheDir, defaultUser, ...session });
+    const running = await startHttpServer({ host: args.host, port: args.port, preloadPlayers: args.preload, cacheDir, defaultUser, ...session, ...injuries });
     const shutdown = () => {
       running.close().finally(() => process.exit(0));
     };
@@ -139,7 +150,7 @@ async function main(): Promise<void> {
   }
 
   // stdio: never write anything but JSON-RPC to stdout.
-  const { server, ctx } = createServer({ preloadPlayers: args.preload, cacheDir, defaultUser, ...session });
+  const { server, ctx } = createServer({ preloadPlayers: args.preload, cacheDir, defaultUser, ...session, ...injuries });
   process.stdout.on("error", (err: NodeJS.ErrnoException) => {
     // The client went away mid-write; exit quietly instead of dumping a stack trace.
     if (err.code === "EPIPE") process.exit(0);

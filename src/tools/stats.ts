@@ -3,6 +3,7 @@ import { z } from "zod";
 import { loadLeague, resolveRoster, resolveWeek, ToolError, type LeagueBundle, type ServerContext } from "../context.js";
 import { TTL } from "../sleeper/client.js";
 import { weeklyRoster } from "../lineups.js";
+import { injuryMetadata } from "../injuries/context.js";
 import { isTeamDefense } from "../sleeper/players.js";
 import type { League, NflState, Roster, StatLine, StatMap } from "../sleeper/types.js";
 import { keyStats, num, round, scoreStatLine, SLOT_ELIGIBILITY, startingSlots } from "../format.js";
@@ -83,7 +84,15 @@ export function registerStatTools(server: McpServer, ctx: ServerContext): void {
         const [projections] = await Promise.all([ctx.client.getProjections("nfl", seasonTypeFor(state, season), season, resolvedWeek), ctx.players.ensureLoaded()]);
         const roster = await weeklyRoster(ctx, bundle, await resolveRoster(ctx, bundle, selector), resolvedWeek);
         const live = await loadLiveWeek(ctx, bundle, roster, resolvedWeek, state);
-        return lineupAnalysis(ctx, bundle, roster.roster_id, roster.players ?? [], roster.starters ?? [], projections, resolvedWeek, live);
+        const analysis = lineupAnalysis(ctx, bundle, roster.roster_id, roster.players ?? [], roster.starters ?? [], projections, resolvedWeek, live);
+        if (resolvedWeek !== state.week || season !== state.season) return analysis;
+        const injuries = await ctx.injuries.report(roster.players ?? []);
+        const relevant = [...analysis.current_lineup, ...(analysis.suggested_changes?.start ?? [])];
+        const watchlist = relevant.filter((p, i) =>
+          relevant.findIndex((other) => other.id === p.id) === i &&
+          p.status !== "final" && p.status !== "playing" && injuries.byPlayer.get(p.id)?.needs_check,
+        ).map((player) => ({ player, injury_context: injuries.byPlayer.get(player.id)! }));
+        return { ...analysis, injury_data: injuryMetadata(injuries), needs_check: watchlist };
       }),
   );
 }

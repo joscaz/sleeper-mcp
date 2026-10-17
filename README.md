@@ -43,7 +43,7 @@ There are several community Sleeper MCP servers. This one focuses on the things 
 | Tests | 100+ unit + integration tests (in-memory and HTTP transports) plus a live smoke test | varies |
 | Tool annotations, `structuredContent`, prompts, resources | ✅ | partial |
 
-The 26 public-API tools are read-only and need no login. The 11 [account tools](#account-tools-optional-session) (2 private reads, 9 writes) are registered only when you configure a Sleeper session, and `--read-only` keeps the writes off even then.
+The 27 read tools need no login. They use Sleeper by default; [optional injury context](#injury-context-optional-espn) can add ESPN reports. The 11 [account tools](#account-tools-optional-session) (2 private reads, 9 writes) are registered only when you configure a Sleeper session, and `--read-only` keeps the writes off even then.
 
 ## Quick start
 
@@ -168,7 +168,8 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 | Tool | What it returns |
 | --- | --- |
 | `search_players` | Name search (handles "ja marr", "lions") with position/team filters, injury and depth-chart info. |
-| `get_player` | Full profile: injury details, practice participation, depth chart, measurables, external IDs, headshot URL. |
+| `get_player` | Full profile plus sourced injury context: report/retrieval timestamps, cache expiry, stale flags, and disagreements. Existing profile fields remain Sleeper-based. |
+| `get_injury_report` | Current injury context for a roster (`league_id` + team selector) or up to 100 `player_ids`. Shows each source, timestamps, links, and a `needs_check` flag; never assumes a missing report means healthy. |
 | `get_trending_players` | Most added/dropped players platform-wide over the last N hours. |
 | `get_free_agents` | Unrostered players in a league ranked by Sleeper's player rank, annotated with 24h trending adds. In season, flags players who can't be picked up right now (`availability`: `locked` once their game has kicked off, `on_waivers` after a recent drop); `addable_only` hides them. |
 
@@ -179,7 +180,7 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 | `get_projections` | Weekly or season (`week=0`) projections. Filter by players/position/league/team. `scoring="league"` applies the league's exact `scoring_settings`. |
 | `get_player_stats` | Actual weekly/season fantasy production with the same filters and scoring options. |
 | `get_lineup_projections` | Start/sit for one team: current vs optimal lineup (respecting FLEX/SUPER_FLEX/IDP eligibility), suggested swaps, bye/injury/empty-slot warnings. Once games kick off, players whose game has started stay locked and count the points they have scored (plus a projection for the rest of a live game), so totals are projected finals and swaps only involve players still to play. |
-| `check_lineups` | Every in-season league a manager is in, checked in one call: starters who will score zero (empty slot, bye, no game, Out/IR/suspended) or are at risk (Doubtful, no projection). Each problem comes with the best healthy bench player who can fill that slot and has not played yet, and the zero-point fixes come back as `set_lineup` arguments per league. Players whose game has started are locked and skipped, best ball leagues and empty rosters (chopped from a guillotine league) are skipped, Questionable players are not flagged. |
+| `check_lineups` | Checks every in-season league for zero-point slots and missing projections. A separate `needs_check` watchlist flags questionable starters, stale injury snapshots, and conflicting reports without injury-driven `set_lineup` moves. Clear zero-point fixes can still return ready-made arguments. Locked starters, best ball leagues, and empty rosters are skipped. |
 
 ### Odds & simulations
 
@@ -219,6 +220,26 @@ IR/taxi moves that bench an in-season starter use the same weekly update and ver
 
 **Getting a token:** log in at [sleeper.com](https://sleeper.com), open DevTools → Network, click any `graphql` request and copy the value of the `authorization` request header (a long `eyJ...` JWT). Set it as `SLEEPER_TOKEN`. Tokens are long-lived but do expire; `get_auth_status` tells you when. Alternatively set `SLEEPER_EMAIL` + `SLEEPER_PASSWORD` and the server logs in on first use (accounts with 2FA/captcha challenges need the token route).
 
+### Injury context (optional ESPN)
+
+Sleeper-only mode is the default. To add the keyless, read-only ESPN injury feed to the existing tools:
+
+```bash
+SLEEPER_MCP_INJURY_SOURCE=espn node dist/index.js --read-only --user your_sleeper_username
+```
+
+For desktop clients, add `SLEEPER_MCP_INJURY_SOURCE` with value `espn` to the server's `env` configuration. No new account connection, package, or credential is needed. The ESPN endpoint is unofficial and may change or stop working; opt in only if its use is appropriate for your deployment and the provider's terms.
+
+- `get_injury_report` accepts a roster or explicit `player_ids`; `get_player` includes the same context. Current-week lineup projections include a `needs_check` list alongside their existing results.
+- Each report has `source`, `reported_at`, `retrieved_at`, `cache_expires_at`, `stale`, and a source link. Sleeper does not expose a reliable per-injury update time, so its `reported_at` is **null**—not the player-map load time or `news_updated`.
+- `stale` means the cached source snapshot has expired, not that the underlying injury has ended. Read the report timestamp too: a recently fetched feed can contain an older report. Expired snapshots retained after a refresh failure keep their original timestamps and carry a warning.
+- ESPN defaults to a five-minute shared cache/retry window, configurable with `SLEEPER_MCP_INJURY_TTL_SECONDS` (60–3600). This is an operational caching policy, not a prediction-confidence threshold. Concurrent callers share a request; there is no background polling. The daily Sleeper player-map cache is unchanged.
+- Player matching requires corroborated ESPN identity or a unique exact name/team/position match. Ambiguous mappings are surfaced, not guessed. The feed is fetched once per cache window rather than downloading every NFL team's roster.
+- Conflicting designations are shown together with `source: "conflict"` and no chosen designation. An ESPN `Active` report does not silently clear a Sleeper injury flag. Absence from the feed is not proof of health.
+- Questionable means **check availability**, not automatically bench. Stale/conflicting reports and newly reported ESPN injuries go on the watchlist rather than creating injury-driven lineup moves. Clear existing Sleeper problems still work; questionable replacement candidates still require your judgment.
+- This release adds evidence, not a new forecasting model: projection totals, optimized lineups and odds remain Sleeper-based. Review the injury context before acting on those recommendations.
+- ESPN outages, malformed responses and timeouts produce warnings while basic Sleeper reads continue. Setting the source back to `sleeper` disables ESPN requests.
+
 ### Prompts
 
 - `weekly_briefing(league_id, username, week?)` — matchup preview, lineup check, waiver targets, league news.
@@ -241,6 +262,8 @@ IR/taxi moves that bench an in-season starter use the same weekly update and ver
 | `SLEEPER_MCP_AUTH_TOKEN` | If set, HTTP clients must send `Authorization: Bearer <token>`. Required in HTTP mode when a Sleeper session has writes enabled and the server is not bound to loopback: it refuses to start otherwise. | unset (no auth) |
 | `SLEEPER_MCP_INSECURE_NO_AUTH` | Set to `1` to run account write tools on a non-loopback address without a bearer token, for deployments that authenticate in front of the server. | unset |
 | `SLEEPER_MCP_CACHE_DIR` | Where the player database is cached on disk. Set to an empty string to disable. | `~/.cache/sleeper-mcp` |
+| `SLEEPER_MCP_INJURY_SOURCE` | `sleeper` or `espn` for optional sourced injury context. No account credentials are sent to ESPN. | `sleeper` |
+| `SLEEPER_MCP_INJURY_TTL_SECONDS` | ESPN snapshot cache/retry window; integer 60–3600. | `300` |
 | `PORT`, `HOST` | HTTP bind defaults (`--port`/`--host` override). | `3000`, `0.0.0.0` |
 
 CLI flags: `--http`, `--port <n>`, `--host <addr>`, `--user <name>`, `--read-only`, `--no-preload`, `--help`, `--version`.

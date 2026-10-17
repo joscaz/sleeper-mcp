@@ -75,6 +75,7 @@ export function playerFullName(player: Player): string {
 export class PlayerStore {
   private players: PlayerMap | null = null;
   private loadedAt = 0;
+  private refreshError: string | null = null;
   private loading: Promise<PlayerMap> | null = null;
   private index: { id: string; full: string; last: string; rank: number }[] = [];
 
@@ -107,6 +108,15 @@ export class PlayerStore {
     return this.loadedAt;
   }
 
+  get freshness() {
+    return {
+      retrieved_at: this.players ? new Date(this.loadedAt).toISOString() : null,
+      cache_expires_at: this.players ? new Date(this.loadedAt + this.maxAgeMs).toISOString() : null,
+      stale: !this.players || this.now() >= this.loadedAt + this.maxAgeMs,
+      refresh_error: this.refreshError,
+    };
+  }
+
   /** Ensure the player map is available (memory -> disk -> network). Safe to call repeatedly. */
   async ensureLoaded(): Promise<PlayerMap> {
     if (this.players && this.now() - this.loadedAt < this.maxAgeMs) return this.players;
@@ -119,8 +129,8 @@ export class PlayerStore {
 
   /** Force a fresh download, bypassing memory and disk caches. */
   async refresh(): Promise<PlayerMap> {
-    const map = await this.client.getAllPlayers(this.sport);
     this.client.cache.delete(`GET /players/${this.sport}`);
+    const map = await this.client.getAllPlayers(this.sport);
     await this.adopt(map, this.now(), true);
     return map;
   }
@@ -133,6 +143,7 @@ export class PlayerStore {
       return fromDisk.players;
     }
     try {
+      this.client.cache.delete(`GET /players/${this.sport}`);
       const map = await this.client.getAllPlayers(this.sport);
       await this.adopt(map, this.now(), true);
       this.log(`player map downloaded (${this.count} players)`);
@@ -141,6 +152,7 @@ export class PlayerStore {
       if (fromDisk) {
         // Stale is better than nothing.
         await this.adopt(fromDisk.players, fromDisk.savedAt, false);
+        this.refreshError = "Player-map refresh failed; using the previous disk snapshot.";
         this.log(`player map download failed (${(err as Error).message}); using stale disk cache`);
         return fromDisk.players;
       }
@@ -149,6 +161,7 @@ export class PlayerStore {
   }
 
   private async adopt(map: PlayerMap, savedAt: number, persist: boolean): Promise<void> {
+    this.refreshError = null;
     this.players = map;
     this.loadedAt = savedAt;
     this.buildIndex(map);
