@@ -43,7 +43,7 @@ There are several community Sleeper MCP servers. This one focuses on the things 
 | Tests | 100+ unit + integration tests (in-memory and HTTP transports) plus a live smoke test | varies |
 | Tool annotations, `structuredContent`, prompts, resources | ✅ | partial |
 
-The 27 read tools need no login. They use Sleeper by default; [optional injury context](#injury-context-optional-espn) can add ESPN reports. The 11 [account tools](#account-tools-optional-session) (2 private reads, 9 writes) are registered only when you configure a Sleeper session, and `--read-only` keeps the writes off even then.
+The 28 read tools need no login. They use Sleeper by default; [optional injury context](#injury-context-optional-espn) can add ESPN reports. The 11 [account tools](#account-tools-optional-session) (2 private reads, 9 writes) are registered only when you configure a Sleeper session, and `--read-only` keeps the writes off even then.
 
 ## Quick start
 
@@ -186,9 +186,42 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 
 | Tool | What it returns |
 | --- | --- |
+| `compare_lineups` | Current weekly lineup versus up to five named start/sit scenarios, using one collected input set. Shows projected-point deltas, approximate win-probability deltas in percentage points, slot/lock validation, and injury warnings. Read-only; invalid roster/slot/lock scenarios do not discard valid ones. |
 | `get_matchup_odds` | Win probability for a week's matchups, live during games: points so far, projected final and win % per side, plus a starter-by-starter view (final / playing / yet to play / bye) for a selected team. Past weeks come back as results, future weeks as projections. |
 | `get_playoff_odds` | Simulates the rest of the regular season (10,000 runs by default) over the real schedule: playoff %, first-round-bye %, #1-seed %, projected record and average seed for every team. For a selected team, also this week's swing (playoff % if they win vs lose) and playoff % by final win total. |
 | `get_move_impact` | What-if for a trade, waiver claim or add/drop: playoff %, bye %, #1-seed %, projected record and average weekly projection before and after the move for your team and the trade partner, plus who enters and leaves the best lineup and a warning when a roster would be over its limit. |
+
+### Comparing lineups (read-only)
+
+`compare_lineups` uses your current scoring-week lineup as the baseline. Each named scenario starts from that same baseline, not from the preceding scenario. Use either `moves` (start/bench swaps) or a complete `starters` list in league slot order.
+
+For example, **if Warren is currently starting and Likely is on your bench**, call `compare_lineups` with these arguments after replacing the league and username placeholders:
+
+```json
+{
+  "league_id": "YOUR_LEAGUE_ID",
+  "username": "your_sleeper_username",
+  "scenarios": [
+    {
+      "name": "Start Likely",
+      "moves": [{ "start": "Isaiah Likely", "bench": "Tyler Warren" }]
+    },
+    {
+      "name": "Keep Warren",
+      "moves": [{ "start": "Tyler Warren", "bench": "Tyler Warren" }]
+    }
+  ]
+}
+```
+
+- The response includes `baseline`, `opponent`, and `scenarios`. Valid scenarios include resolved starters, changes, `projected_points_delta`, `win_pct`, and `win_probability_delta_pp`. A delta of `2.5` means **2.5 percentage points**, not a 2.5% relative improvement.
+- It reuses the existing league scoring and matchup-odds model, including points already scored and the projection for the rest of live games. A no-op produces zero deltas.
+- Roster membership, position/FLEX eligibility, IR/taxi status, duplicate starters, and kickoff locks are validated. Roster/slot/lock errors return `valid: false` for that scenario while valid scenarios still run. Malformed tool arguments or duplicate scenario names reject the request.
+- The first version supports the current regular-season NFL week in an active, synchronized, non-best-ball league. No past/future-week counterfactuals, trades, pickups, or opponent lineup optimization.
+- Every scenario uses one collected set of inputs. This is **not an atomic upstream snapshot**; source caches apply, and public roster/matchup data can lag a recent change. The tool uses public weekly matchups even when a session is configured and never calls account APIs.
+- If there is no single head-to-head opponent or the opponent's lineup is unavailable, point comparisons still work but win probabilities are `null` with a reason. Commissioner `custom_points` overrides keep the modeled team total fixed.
+- Injury evidence and warnings accompany the results, but Questionable/ESPN reports do not rewrite the model. Probabilities assume independent position-based variation and are approximate—not Sleeper's official odds or a guarantee of improved results.
+- This tool **never changes your lineup**. Any later `set_lineup` action requires a separate decision and fresh validation.
 
 ### Account tools (optional, session)
 

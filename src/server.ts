@@ -12,6 +12,7 @@ import { registerLineupCheckTools } from "./tools/lineup-check.js";
 import { registerOddsTools } from "./tools/odds.js";
 import { registerAccountTools } from "./tools/account.js";
 import { registerInjuryTools } from "./tools/injuries.js";
+import { registerLineupComparisonTool } from "./tools/compare-lineups.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { name: string; version: string };
@@ -28,6 +29,7 @@ Typical flow:
 4. check_lineups ("are any of my lineups broken this week?") scans every league at once: empty slots, byes, ruled-out starters, with set_lineup-ready fixes.
 5. get_matchup_odds ("am I going to win this week?", live during games), get_playoff_odds ("will I make the playoffs?", "what do I need?") and get_move_impact ("does this trade or pickup help my playoff odds?").
 6. get_injury_report for source timestamps, stale snapshots and disagreements. Questionable means check availability, not automatically bench.
+7. compare_lineups to compare proposed start/sit scenarios against the current weekly lineup without changing anything.
 
 Notes:
 - Player ids are resolved to {id, name, pos, team, inj} everywhere; team defenses use team codes (e.g. "DET").
@@ -61,6 +63,7 @@ export function createServer(options: CreateServerOptions = {}): { server: McpSe
   registerStatTools(server, ctx);
   registerLineupCheckTools(server, ctx);
   registerOddsTools(server, ctx);
+  registerLineupComparisonTool(server, ctx);
   registerAccountTools(server, ctx);
   registerPrompts(server);
   registerResources(server, ctx);
