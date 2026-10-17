@@ -1,6 +1,7 @@
 {
   "name": "@joscaz/sleeper-mcp",
   "version": "0.1.0",
+  "private": true,
   "description": "Model Context Protocol server for Sleeper fantasy football: resolved player names everywhere, standings, matchups, free agents, drafts, league-scored projections, plus optional account tools (lineups, IR, waivers, trades). stdio + Streamable HTTP.",
   "keywords": [
     "mcp",
@@ -56,8 +57,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "tsx scripts/smoke.ts",
-    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
-    "prepublishOnly": "npm run build && npm test"
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

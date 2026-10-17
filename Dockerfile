@@ -1,7 +1,7 @@
 # Hosted / remote mode: serves the MCP server over Streamable HTTP on $PORT (default 3000).
 #
 #   docker build -t sleeper-mcp .
-#   docker run -p 3000:3000 -e SLEEPER_MCP_AUTH_TOKEN=change-me sleeper-mcp
+#   docker run --rm -p 127.0.0.1:3000:3000 -e SLEEPER_MCP_AUTH_TOKEN sleeper-mcp node dist/index.js --http --read-only
 #
 FROM node:22-alpine AS build
 WORKDIR /app

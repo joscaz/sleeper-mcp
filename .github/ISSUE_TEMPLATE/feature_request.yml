@@ -14,7 +14,7 @@ body:
     id: proposal
     attributes:
       label: Proposed tool or change
-      description: Sketch the tool name, inputs and output if you have one in mind. Note that the server is read-only; Sleeper has no public API for lineup, waiver or trade changes.
+      description: Sketch the tool name, inputs and output if you have one in mind. Public tools are read-only; optional account tools use Sleeper's unofficial private API. Account-write proposals should describe validation, dry-run behavior, and verification.
   - type: textarea
     id: data
     attributes:

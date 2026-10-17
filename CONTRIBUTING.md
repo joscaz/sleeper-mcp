@@ -5,7 +5,8 @@ Thanks for helping make fantasy football questions answerable by an AI assistant
 ## Ground rules
 
 - Be kind. This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
-- The server is **read-only by design**. Sleeper has no public write API, and we will not ship anything that scrapes private endpoints or stores login tokens. Proposals for lineup changes, waiver claims or trades will be closed with a pointer to this section.
+- Public-API tools are **read-only and require no login**. Optional account tools use Sleeper's unofficial private GraphQL API for private reads and account changes. Keep those tools behind explicit session configuration, honor `--read-only`, support `dry_run` for writes, and preserve validation and verification. Private API changes can break these tools without notice.
+- Do not put credentials, session tokens, or private account responses in code, fixtures, logs, issues, or pull requests. Security-sensitive changes should follow [SECURITY.md](SECURITY.md).
 - Every tool must return **resolved player names**, never bare Sleeper player IDs. That is the whole point of this server.
 - No new runtime dependencies without a discussion first. The runtime footprint is `@modelcontextprotocol/sdk` and `zod`, and it should stay that small.
 
@@ -58,12 +59,17 @@ The first run downloads Sleeper's player database (~5 MB) and caches it under `~
 - Update `CHANGELOG.md` under **Unreleased**.
 - Describe *why* in the PR description, not just what. The template asks for the essentials.
 
-Bug reports are most useful with the exact tool call (name and arguments), the `sleeper-mcp --version` output and which client you were using. The issue templates prompt for those.
+Bug reports are most useful with the exact tool call (name and redacted arguments), the `node dist/index.js --version` output, the checkout commit (`git rev-parse HEAD`) and which client you were using. The issue templates prompt for those. Never include credentials or unredacted private account responses.
 
 ## Releasing (maintainers)
 
-1. Move the **Unreleased** section of `CHANGELOG.md` under the new version and date.
-2. `npm version <patch|minor|major>` (this commits and tags `vX.Y.Z`).
-3. `git push --follow-tags`.
+The project is distributed as source, not through npm. `package.json` has `"private": true` to prevent accidental npm publication; the GitHub repository remains public. Do not remove this guard as part of a routine release.
 
-Pushing a `v*` tag runs the `Release` workflow, which re-runs the checks, publishes `@joscaz/sleeper-mcp` to npm with provenance and creates a GitHub release with generated notes. The workflow needs an `NPM_TOKEN` repository secret (an npm automation token) until npm trusted publishing is configured for the package.
+1. Prepare a release PR: move **Unreleased** changelog entries under the intended version/date and run `npm version <patch|minor|major> --no-git-tag-version`. Commit both package manifests with the changelog. This does not create or push a tag.
+2. Run `npm ci && npm run typecheck && npm test && npm run build`, then `node dist/index.js --help` and `node dist/index.js --version`. Review and merge the release PR normally.
+3. Only when intentionally releasing, tag the reviewed commit as `vX.Y.Z` and push that specific tag: `git push origin vX.Y.Z`. Avoid `--follow-tags`, which can publish unrelated local tags too. Tags are public even while the release is a draft.
+4. The **Draft GitHub release** workflow checks that the tag matches `package.json`, repeats validation, and creates a draft GitHub release with generated notes. Review the notes and source checkout instructions before manually publishing that GitHub release.
+
+The workflow does not publish packages or images and does not need an npm token or OIDC publishing permission. Existing tags are verified rather than created by the release command. No release is created by an ordinary branch push or PR.
+
+Enabling npm publication later must be a separate, explicitly reviewed change to the package guard, workflow, and installation documentation.

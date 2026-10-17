@@ -14,7 +14,7 @@ body:
     id: call
     attributes:
       label: Tool call
-      description: The tool name and arguments, if you know them. League IDs and usernames are public on Sleeper, so it is fine to include them.
+      description: The tool name and arguments, if you know them. Remove credentials, authorization headers, and private account responses. Share league IDs or usernames only if you are comfortable making them public.
       render: json
       placeholder: '{ "name": "get_roster", "arguments": { "league_id": "1234567890", "username": "someone" } }'
   - type: textarea
@@ -25,10 +25,15 @@ body:
     id: version
     attributes:
       label: Version
-      description: Output of `sleeper-mcp --version` (or `node dist/index.js --version`).
+      description: Output of `node dist/index.js --version`.
       placeholder: 0.1.0
     validations:
       required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Checkout commit
+      description: Output of `git rev-parse HEAD` from the source checkout.
   - type: dropdown
     id: client
     attributes:
@@ -51,5 +56,5 @@ body:
     id: logs
     attributes:
       label: Logs
-      description: Anything the server printed to stderr (lines starting with `[sleeper-mcp]`).
+      description: Relevant stderr output (lines starting with `[sleeper-mcp]`). Remove credentials, authorization headers, and private account data before posting.
       render: shell
