@@ -5,6 +5,7 @@ import type { BracketMatch, Matchup, Roster } from "../sleeper/types.js";
 import type { PlayerRef } from "../sleeper/players.js";
 import { num, points, record, round, startingSlots, teamLabel } from "../format.js";
 import { guard, leagueIdSchema, teamSelectorShape, weekSchema } from "./shared.js";
+import { weeklyRoster } from "../lineups.js";
 
 export function registerRosterTools(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
@@ -12,7 +13,7 @@ export function registerRosterTools(server: McpServer, ctx: ServerContext): void
     {
       title: "One team's roster",
       description:
-        "A single team in a league, identified by username, user_id, roster_id or team_name: starters (with slot labels), bench, IR and taxi squad, all resolved to player names/positions/teams with injury flags, plus record, points and waiver/FAAB status.",
+        "A single team in a league, identified by username, user_id, roster_id or team_name: starters (with slot labels), bench, IR and taxi squad, all resolved to player names/positions/teams with injury flags, plus record, points and waiver/FAAB status. During an active season, starters come from the current weekly matchup, not roster defaults.",
       inputSchema: { league_id: leagueIdSchema, ...teamSelectorShape },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -20,8 +21,14 @@ export function registerRosterTools(server: McpServer, ctx: ServerContext): void
       guard(async () => {
         const bundle = await loadLeague(ctx, league_id);
         await ctx.players.ensureLoaded();
-        const roster = await resolveRoster(ctx, bundle, selector);
-        return { league_id: bundle.league.league_id, league: bundle.league.name, season: bundle.league.season, ...describeRoster(ctx, bundle, roster, true) };
+        let roster = await resolveRoster(ctx, bundle, selector);
+        const week = bundle.league.status === "in_season" ? (await resolveWeek(ctx, undefined)).week : undefined;
+        if (week !== undefined) roster = await weeklyRoster(ctx, bundle, roster, week);
+        return {
+          league_id: bundle.league.league_id, league: bundle.league.name, season: bundle.league.season,
+          ...describeRoster(ctx, bundle, roster, true),
+          ...(week !== undefined ? { week, lineup_source: "weekly_matchup" } : {}),
+        };
       }),
   );
 

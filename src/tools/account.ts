@@ -15,6 +15,7 @@ import type { Roster, Transaction } from "../sleeper/types.js";
 import { describeRoster } from "./rosters.js";
 import { describeTransaction } from "./transactions.js";
 import { guard, leagueIdSchema, weekSchema } from "./shared.js";
+import { currentLineupWeek, saveWeeklyStarters, validateLineupLocks, weeklyRoster } from "../lineups.js";
 
 const WRITE_NOTE = "Changes the manager's real Sleeper account: confirm with them first. Use dry_run=true to preview without saving.";
 
@@ -117,7 +118,7 @@ export function registerAccountTools(server: McpServer, ctx: ServerContext): voi
     {
       title: "Set starting lineup",
       description:
-        `Change who starts. Either pass moves (start X for Y; Y omitted = first open eligible slot) or the complete starters list in league slot order. Slot eligibility (FLEX, SUPER_FLEX...), IR/taxi and duplicates are validated before anything is sent. ${WRITE_NOTE}`,
+        `Change who starts in the current scoring week (roster defaults outside an active season). Either pass moves (start X for Y; Y omitted = first open eligible slot) or the complete starters list in league slot order. Slot eligibility, IR/taxi, duplicates and kickoff locks are validated. In-season changes use weekly matchup starters and are independently read back; verification failure is not success. ${WRITE_NOTE}`,
       inputSchema: {
         league_id: leagueIdSchema,
         roster_id: ownRosterSchema,
@@ -139,16 +140,23 @@ export function registerAccountTools(server: McpServer, ctx: ServerContext): voi
     async ({ league_id, roster_id, moves, starters, dry_run }) =>
       guard(async () => {
         if (!moves?.length && !starters) throw new ToolError("Pass either moves (e.g. [{start: \"Blake Corum\", bench: \"Josh Jacobs\"}]) or the full starters list.");
+        ctx.client.cache.delete(`GET /league/${encodeURIComponent(league_id)}`);
         const bundle = await loadLeague(ctx, league_id);
         await ctx.players.ensureLoaded();
-        const roster = await resolveOwnRoster(ctx, bundle, roster_id);
+        const week = bundle.league.status === "in_season" ? await currentLineupWeek(ctx, bundle) : undefined;
+        let roster = await resolveOwnRoster(ctx, bundle, roster_id, week !== undefined);
+        if (week !== undefined) roster = await weeklyRoster(ctx, bundle, roster, week, true);
         const plan = planLineup(ctx, bundle, roster, { moves, starters });
         if (!plan.changes.length) {
-          return { league_id: bundle.league.league_id, team: teamLabel(bundle.teams, roster.roster_id), changed: false, note: "Lineup already matches; nothing sent.", roster: describeRoster(ctx, bundle, roster, true) };
+          return { league_id: bundle.league.league_id, team: teamLabel(bundle.teams, roster.roster_id), week, changed: false, note: "Lineup already matches; nothing sent.", roster: describeRoster(ctx, bundle, roster, true) };
         }
-        return commitRoster(ctx, bundle, roster, dry_run, plan.changes, { starters: plan.starters }, () =>
-          auth.updateStarters(bundle.league.league_id, roster.roster_id, plan.starters),
+        if (week !== undefined) await validateLineupLocks(ctx, bundle, roster, week, plan.starters);
+        const result = await commitRoster(ctx, bundle, roster, dry_run, plan.changes, { starters: plan.starters }, () =>
+          week === undefined
+            ? auth.updateStarters(bundle.league.league_id, roster.roster_id, plan.starters)
+            : saveWeeklyStarters(ctx, bundle, roster, week, plan.starters),
         );
+        return { ...result, week, lineup_source: week === undefined ? "roster_defaults" : "weekly_matchup", ...(week !== undefined && !dry_run ? { verified: true } : {}) };
       }),
   );
 
@@ -173,14 +181,27 @@ export function registerAccountTools(server: McpServer, ctx: ServerContext): voi
     async ({ league_id, roster_id, add, remove, dry_run }) =>
       guard(async () => {
         if (!add.length && !remove.length) throw new ToolError("Pass players in add (to IR) and/or remove (activate).");
+        ctx.client.cache.delete(`GET /league/${encodeURIComponent(league_id)}`);
         const bundle = await loadLeague(ctx, league_id);
         await ctx.players.ensureLoaded();
-        const roster = await resolveOwnRoster(ctx, bundle, roster_id);
+        const week = bundle.league.status === "in_season" ? await currentLineupWeek(ctx, bundle) : undefined;
+        let roster = await resolveOwnRoster(ctx, bundle, roster_id, week !== undefined);
+        if (week !== undefined) roster = await weeklyRoster(ctx, bundle, roster, week);
         const capacity = num(bundle.league.settings?.reserve_slots) || (bundle.league.roster_positions ?? []).filter((s) => s === "IR").length;
         const plan = planListChange(ctx, roster, roster.reserve ?? [], { add, remove, capacity, label: "IR" });
+        if (week !== undefined && plan.starters) await validateLineupLocks(ctx, bundle, roster, week, plan.starters);
         return commitRoster(ctx, bundle, roster, dry_run, plan.changes, { reserve: plan.list, starters: plan.starters }, async () => {
-          if (plan.starters) await auth.updateStarters(bundle.league.league_id, roster.roster_id, plan.starters);
-          return auth.updateReserve(bundle.league.league_id, roster.roster_id, plan.list);
+          if (plan.starters) {
+            if (week === undefined) await auth.updateStarters(bundle.league.league_id, roster.roster_id, plan.starters);
+            else await saveWeeklyStarters(ctx, bundle, roster, week, plan.starters);
+          }
+          try {
+            const updated = await auth.updateReserve(bundle.league.league_id, roster.roster_id, plan.list);
+            return week === undefined ? updated : { ...updated, starters: plan.starters ?? roster.starters };
+          } catch (err) {
+            if (week !== undefined && plan.starters) throw new ToolError(`Weekly starters were updated and verified, but the IR move failed (${(err as Error).message}). Check Sleeper before retrying.`);
+            throw err;
+          }
         });
       }),
   );
@@ -203,15 +224,28 @@ export function registerAccountTools(server: McpServer, ctx: ServerContext): voi
     async ({ league_id, roster_id, add, remove, force, dry_run }) =>
       guard(async () => {
         if (!add.length && !remove.length) throw new ToolError("Pass players in add (to taxi) and/or remove (promote).");
+        ctx.client.cache.delete(`GET /league/${encodeURIComponent(league_id)}`);
         const bundle = await loadLeague(ctx, league_id);
         await ctx.players.ensureLoaded();
-        const roster = await resolveOwnRoster(ctx, bundle, roster_id);
+        const week = bundle.league.status === "in_season" ? await currentLineupWeek(ctx, bundle) : undefined;
+        let roster = await resolveOwnRoster(ctx, bundle, roster_id, week !== undefined);
+        if (week !== undefined) roster = await weeklyRoster(ctx, bundle, roster, week);
         const capacity = num(bundle.league.settings?.taxi_slots);
         if (!capacity) throw new ToolError(`League "${bundle.league.name}" has no taxi squad.`);
         const plan = planListChange(ctx, roster, roster.taxi ?? [], { add, remove, capacity, label: "taxi" });
+        if (week !== undefined && plan.starters) await validateLineupLocks(ctx, bundle, roster, week, plan.starters);
         return commitRoster(ctx, bundle, roster, dry_run, plan.changes, { taxi: plan.list, starters: plan.starters }, async () => {
-          if (plan.starters) await auth.updateStarters(bundle.league.league_id, roster.roster_id, plan.starters);
-          return auth.updateTaxi(bundle.league.league_id, roster.roster_id, plan.list, force);
+          if (plan.starters) {
+            if (week === undefined) await auth.updateStarters(bundle.league.league_id, roster.roster_id, plan.starters);
+            else await saveWeeklyStarters(ctx, bundle, roster, week, plan.starters);
+          }
+          try {
+            const updated = await auth.updateTaxi(bundle.league.league_id, roster.roster_id, plan.list, force);
+            return week === undefined ? updated : { ...updated, starters: plan.starters ?? roster.starters };
+          } catch (err) {
+            if (week !== undefined && plan.starters) throw new ToolError(`Weekly starters were updated and verified, but the taxi move failed (${(err as Error).message}). Check Sleeper before retrying.`);
+            throw err;
+          }
         });
       }),
   );
@@ -449,8 +483,8 @@ function num(value: unknown): number {
  * The roster the session user owns in this league (or an explicit roster_id, e.g. for commissioners),
  * refreshed from Sleeper's live store so a move made seconds ago is already reflected.
  */
-export async function resolveOwnRoster(ctx: ServerContext, bundle: LeagueBundle, rosterId: number | undefined): Promise<Roster> {
-  return freshenRoster(ctx, bundle, await pickOwnRoster(ctx, bundle, rosterId));
+export async function resolveOwnRoster(ctx: ServerContext, bundle: LeagueBundle, rosterId: number | undefined, requireLive = false): Promise<Roster> {
+  return freshenRoster(ctx, bundle, await pickOwnRoster(ctx, bundle, rosterId), requireLive);
 }
 
 async function pickOwnRoster(ctx: ServerContext, bundle: LeagueBundle, rosterId: number | undefined): Promise<Roster> {
@@ -467,18 +501,22 @@ async function pickOwnRoster(ctx: ServerContext, bundle: LeagueBundle, rosterId:
 
 /**
  * Overlay Sleeper's live view of a roster (players, starters, IR, taxi) on the public-API copy, which trails a
- * write by a minute or two. Best effort: without a session, or if the read fails, the public copy is used as is.
+ * write by a minute or two. Read callers may fall back to the public copy; requireLive forbids that for lineup writes.
  */
-export async function freshenRoster(ctx: ServerContext, bundle: LeagueBundle, roster: Roster): Promise<Roster> {
+export async function freshenRoster(ctx: ServerContext, bundle: LeagueBundle, roster: Roster, requireLive = false): Promise<Roster> {
   if (!ctx.auth) return roster;
   let live: GqlRoster | undefined;
   try {
     live = (await ctx.auth.rosters(bundle.league.league_id)).find((r) => r.roster_id === roster.roster_id);
   } catch (err) {
+    if (requireLive) throw new ToolError(`Could not read the live roster; no lineup change was sent (${(err as Error).message}).`);
     ctx.log(`live roster read failed, using the public copy: ${(err as Error).message}`);
     return roster;
   }
-  if (!live) return roster;
+  if (!live) {
+    if (requireLive) throw new ToolError("The live roster is missing; no lineup change was sent.");
+    return roster;
+  }
   const fresh: Roster = {
     ...roster,
     players: live.players ?? roster.players,
@@ -687,7 +725,7 @@ async function commitRoster(
   dryRun: boolean,
   changes: string[],
   patch: Partial<Pick<Roster, "starters" | "reserve" | "taxi" | "players">>,
-  send: () => Promise<GqlRoster>,
+  send: () => Promise<Partial<GqlRoster>>,
 ) {
   const base = { league_id: bundle.league.league_id, team: teamLabel(bundle.teams, roster.roster_id), changes };
   if (dryRun) {
