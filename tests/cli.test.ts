@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseArgs } from "../src/index.js";
+import { injuryOptions, parseArgs } from "../src/index.js";
 
 describe("CLI argument parsing", () => {
   it("defaults to stdio", () => {
@@ -34,5 +34,20 @@ describe("CLI --read-only", () => {
   it("parses the flag", () => {
     expect(parseArgs(["--read-only"]).readOnly).toBe(true);
     expect(parseArgs(["--http", "--read-only", "--user", "alice"])).toMatchObject({ http: true, readOnly: true, user: "alice" });
+  });
+});
+
+describe("optional injury source configuration", () => {
+  it("defaults to Sleeper only and accepts explicit ESPN opt-in", () => {
+    expect(injuryOptions({})).toEqual({ injurySource: "sleeper", injuryCacheTtlMs: 300_000 });
+    expect(injuryOptions({ SLEEPER_MCP_INJURY_SOURCE: "espn", SLEEPER_MCP_INJURY_TTL_SECONDS: "120" }))
+      .toEqual({ injurySource: "espn", injuryCacheTtlMs: 120_000 });
+  });
+
+  it("rejects unsupported sources and invalid cache durations", () => {
+    expect(() => injuryOptions({ SLEEPER_MCP_INJURY_SOURCE: "other" })).toThrow(/must be sleeper or espn/);
+    for (const value of ["0", "-1", "59", "3601", "NaN", "60.5", ""]) {
+      expect(() => injuryOptions({ SLEEPER_MCP_INJURY_TTL_SECONDS: value })).toThrow(/60 to 3600/);
+    }
   });
 });

@@ -7,6 +7,7 @@ import type { NflState, Player } from "../sleeper/types.js";
 import { isoDate, num } from "../format.js";
 import { hasKickedOff, loadWeekGames, nflTeam } from "../games.js";
 import { guard, leagueIdSchema, positionSchema, sportSchema } from "./shared.js";
+import { injuryMetadata } from "../injuries/context.js";
 
 export function registerPlayerTools(server: McpServer, ctx: ServerContext): void {
   server.registerTool(
@@ -62,7 +63,8 @@ export function registerPlayerTools(server: McpServer, ctx: ServerContext): void
           }
         }
         if (!player) throw new ToolError(`No player found for ${player_id ? `id ${player_id}` : `"${name}"`}. Try search_players.`);
-        return playerDetails(player);
+        const injuries = await ctx.injuries.report([player.player_id]);
+        return { ...playerDetails(player), injury_context: injuries.byPlayer.get(player.player_id), injury_data: injuryMetadata(injuries) };
       }),
   );
 

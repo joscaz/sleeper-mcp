@@ -37,6 +37,7 @@ describe("server surface", () => {
         "get_draft_picks",
         "get_drafts",
         "get_free_agents",
+        "get_injury_report",
         "get_league",
         "get_league_history",
         "get_league_rosters",

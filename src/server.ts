@@ -11,6 +11,7 @@ import { registerStatTools } from "./tools/stats.js";
 import { registerLineupCheckTools } from "./tools/lineup-check.js";
 import { registerOddsTools } from "./tools/odds.js";
 import { registerAccountTools } from "./tools/account.js";
+import { registerInjuryTools } from "./tools/injuries.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { name: string; version: string };
@@ -26,12 +27,13 @@ Typical flow:
 3. get_roster / get_matchups / get_transactions / get_free_agents / get_lineup_projections for the actual questions.
 4. check_lineups ("are any of my lineups broken this week?") scans every league at once: empty slots, byes, ruled-out starters, with set_lineup-ready fixes.
 5. get_matchup_odds ("am I going to win this week?", live during games), get_playoff_odds ("will I make the playoffs?", "what do I need?") and get_move_impact ("does this trade or pickup help my playoff odds?").
+6. get_injury_report for source timestamps, stale snapshots and disagreements. Questionable means check availability, not automatically bench.
 
 Notes:
 - Player ids are resolved to {id, name, pos, team, inj} everywhere; team defenses use team codes (e.g. "DET").
 - "week" defaults to the current NFL week from get_nfl_state; "season" defaults to the current league season.
 - Any team can be selected by username, user_id, roster_id or team_name.
-- Data is cached briefly (20s–5min); the player database refreshes daily.`;
+- Data is cached briefly (20s–5min); the player database refreshes daily. Injury context distinguishes report timestamps from snapshot retrieval times. The optional ESPN source is off unless configured; projections and odds remain Sleeper-based.`;
 
 export interface CreateServerOptions extends ContextOptions {
   /** Kick off the player-map download in the background as soon as the server is created (default true). */
@@ -55,6 +57,7 @@ export function createServer(options: CreateServerOptions = {}): { server: McpSe
   registerTransactionTools(server, ctx);
   registerDraftTools(server, ctx);
   registerPlayerTools(server, ctx);
+  registerInjuryTools(server, ctx);
   registerStatTools(server, ctx);
   registerLineupCheckTools(server, ctx);
   registerOddsTools(server, ctx);
@@ -94,6 +97,7 @@ function registerPrompts(server: McpServer): void {
               "1. get_league for scoring/roster format, get_league_standings for records, get_playoff_odds for the playoff picture.",
               `2. get_matchup_odds for ${username}'s matchup: opponent, score and projected final, win probability, key players on both sides.`,
               `3. get_lineup_projections for ${username}: flag empty slots, injured/bye starters, and better bench options.`,
+              `Use get_injury_report for ${username} to check source timestamps and disagreements before recommending an injury-driven swap; Questionable does not mean Out.`,
               "4. get_free_agents (top few at the weakest positions) and get_trending_players to suggest waiver targets.",
               "5. get_transactions (this week) for notable league moves and trades.",
               "",

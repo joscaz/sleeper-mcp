@@ -13,6 +13,7 @@ import { isTeamDefense, type PlayerRef } from "../sleeper/players.js";
 import type { League, Matchup, NflState, StatMap } from "../sleeper/types.js";
 import { freshenRoster } from "./account.js";
 import { weeklyRoster } from "../lineups.js";
+import { injuryMetadata, type PlayerInjuryContext } from "../injuries/context.js";
 import { lineupAnalysis, loadLiveWeek, seasonTypeFor } from "./stats.js";
 import { guard, userIdSchema, usernameSchema, weekSchema } from "./shared.js";
 
@@ -52,6 +53,8 @@ interface LeagueReport {
   /** Extra points a full start/sit re-optimisation would add (see get_lineup_projections). */
   optimal_gain: number;
   problems?: Problem[];
+  needs_check?: { slot: string; player: Entry; injury_context: PlayerInjuryContext }[];
+  injury_data?: ReturnType<typeof injuryMetadata>;
   set_lineup?: { league_id: string; moves: Move[] };
 }
 
@@ -74,7 +77,7 @@ export function registerLineupCheckTools(server: McpServer, ctx: ServerContext):
     {
       title: "Lineup check across all leagues",
       description:
-        "Checks every in-season league a manager is in for this week's lineup problems: starters who will score zero (empty slot, bye, no game, Out/IR/suspended) and starters at risk (Doubtful, no projection). Questionable players are not flagged. For each problem it suggests the highest-projected healthy bench player who can play that slot and whose game has not started, and returns the zero-point fixes as ready-made set_lineup arguments per league. Starters whose game has kicked off are locked and skipped; best ball leagues are skipped. Also reports optimal_gain, the points a full start/sit re-optimisation would add (get_lineup_projections has the details).",
+        "Checks every in-season league for empty slots, byes, no game, ruled-out starters, and missing projections. A separate needs_check list shows questionable starters, stale injury data and conflicting reports; these do not generate injury-based set_lineup moves. Includes source timestamps and optional ESPN evidence. Locked starters and best ball leagues are skipped. Zero-point fixes from unambiguous Sleeper data can return set_lineup arguments; projections remain Sleeper-based.",
       inputSchema: {
         username: usernameSchema.describe("Manager to check. Omit to use the server's default user, or the logged-in Sleeper account."),
         user_id: userIdSchema,
@@ -132,6 +135,7 @@ async function checkLineups(ctx: ServerContext, args: CheckArgs) {
   const zero = problems.filter((p) => p.impact === "scores_zero");
   const fixable = zero.filter((p) => p.replacement).length;
   const counts = { needs_fix: 0, at_risk: 0, ok: 0 };
+  const needsChecking = reports.reduce((sum, r) => sum + (r.needs_check?.length ?? 0), 0);
   for (const r of reports) counts[r.status]++;
 
   return {
@@ -140,7 +144,8 @@ async function checkLineups(ctx: ServerContext, args: CheckArgs) {
     week,
     leagues_checked: reports.length,
     ...counts,
-    summary: summarize(reports.length, counts, zero.length, fixable, problems.length - zero.length),
+    summary: summarize(reports.length, counts, zero.length, fixable, problems.length - zero.length, needsChecking),
+    needs_check: needsChecking,
     leagues: reports,
     skipped,
     ...(reports.some((r) => r.set_lineup) ? { next_step: nextStep(ctx) } : {}),
@@ -176,17 +181,29 @@ async function checkLeague(ctx: ServerContext, league: League, userId: string, w
   roster = await weeklyRoster(ctx, bundle, roster, week);
   const live = await loadLiveWeek(ctx, bundle, roster, week, state);
   const analysis = lineupAnalysis(ctx, bundle, roster.roster_id, roster.players ?? [], roster.starters ?? [], projections, week, live);
+  // Today's reports must not be represented as historical or future-week injury evidence.
+  const injuries = week === state.week && league.season === state.season
+    ? await ctx.injuries.report(roster.players ?? []) : null;
 
   const problems: Problem[] = [];
+  const needsCheck: NonNullable<LeagueReport["needs_check"]> = [];
   for (const entry of analysis.current_lineup as Entry[]) {
+    const injury = injuries?.byPlayer.get(entry.id);
+    const locked = entry.status === "final" || entry.status === "playing";
+    if (injury?.needs_check && !locked) needsCheck.push({ slot: entry.slot ?? "?", player: entry, injury_context: injury });
     const found = diagnose(entry, projections);
+    if (injury?.needs_check && (found?.issue === "out" || found?.issue === "doubtful")) continue;
     if (found) problems.push({ slot: entry.slot ?? "?", ...found, player: entry.id === "0" ? null : entry, replacement: null });
   }
 
   // Bench players who can step in: not on IR/taxi, game not started, healthy, and projected to score.
   const blocked = new Set([...(roster.reserve ?? []), ...(roster.taxi ?? [])]);
   const pool = (analysis.bench as Entry[]).filter(
-    (b) => !blocked.has(b.id) && !b.status && !OUT_RE.test(b.inj ?? "") && !DOUBTFUL_RE.test(b.inj ?? "") && (b.pts ?? 0) > 0,
+    (b) => {
+      const context = injuries?.byPlayer.get(b.id);
+      const uncertain = context?.conflict || context?.reports.some((r) => r.stale || OUT_RE.test(r.designation ?? "") || DOUBTFUL_RE.test(r.designation ?? ""));
+      return !uncertain && !blocked.has(b.id) && !b.status && !OUT_RE.test(b.inj ?? "") && !DOUBTFUL_RE.test(b.inj ?? "") && (b.pts ?? 0) > 0;
+    },
   );
   const used = new Set<string>();
   // Zero-point problems pick first, and narrow slots (TE, K) before wide ones (FLEX, SUPER_FLEX).
@@ -206,7 +223,7 @@ async function checkLeague(ctx: ServerContext, league: League, userId: string, w
     .filter((p) => p.impact === "scores_zero" && p.replacement)
     .map((p) => (p.player ? { start: p.replacement!.id, bench: p.player.id } : { start: p.replacement!.id, slot: p.slot }));
 
-  const status: LeagueStatusLabel = problems.some((p) => p.impact === "scores_zero") ? "needs_fix" : problems.length ? "at_risk" : "ok";
+  const status: LeagueStatusLabel = problems.some((p) => p.impact === "scores_zero") ? "needs_fix" : problems.length || needsCheck.length ? "at_risk" : "ok";
   return {
     league_id: league.league_id,
     league: league.name,
@@ -215,6 +232,8 @@ async function checkLeague(ctx: ServerContext, league: League, userId: string, w
     projected_total: analysis.current_projected_total,
     optimal_gain: analysis.projected_gain,
     ...(problems.length ? { problems } : {}),
+    ...(needsCheck.length ? { needs_check: needsCheck } : {}),
+    ...(injuries ? { injury_data: injuryMetadata(injuries) } : {}),
     ...(moves.length ? { set_lineup: { league_id: league.league_id, moves } } : {}),
   };
 }
@@ -255,12 +274,13 @@ async function resolveCheckUser(ctx: ServerContext, args: CheckArgs): Promise<st
   throw new ToolError(NO_USER_HINT);
 }
 
-function summarize(checked: number, counts: Record<LeagueStatusLabel, number>, zero: number, fixable: number, risky: number): string {
+function summarize(checked: number, counts: Record<LeagueStatusLabel, number>, zero: number, fixable: number, risky: number, needsChecking = 0): string {
   if (!checked) return "No in-season leagues to check.";
   if (!counts.needs_fix && !counts.at_risk) return `All ${checked} lineup(s) are set: no empty slots, byes or ruled-out starters.`;
   const parts: string[] = [];
   if (zero) parts.push(`${zero} starter slot(s) will score zero in ${counts.needs_fix} league(s), ${fixable} fixable from the bench`);
   if (risky) parts.push(`${risky} starter(s) at risk`);
+  if (needsChecking) parts.push(`${needsChecking} starter(s) need injury review (not automatic bench recommendations)`);
   return `${parts.join("; ")}.`;
 }
 

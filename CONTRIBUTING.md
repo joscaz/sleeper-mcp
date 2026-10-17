@@ -38,6 +38,7 @@ The first run downloads Sleeper's player database (~5 MB) and caches it under `~
 | `src/context.ts` | Shared per-server context: resolving users, rosters, seasons, weeks |
 | `src/format.ts` | Turns raw Sleeper objects into named, assistant-friendly shapes |
 | `src/sleeper/` | Typed Sleeper API client, TTL cache, rate limiter, player database |
+| `src/injuries/` | Optional read-only injury feed, strict identity matching, source timestamps and conservative disagreement handling |
 | `src/tools/` | One file per tool family (leagues, rosters, transactions, drafts, players, stats) |
 | `tests/` | Vitest suites; `fixtures.ts` is a small 4-team league served by a fake `fetch` |
 | `scripts/smoke.ts` | End-to-end check against the live API |

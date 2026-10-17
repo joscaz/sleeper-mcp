@@ -3,6 +3,8 @@ import { SleeperGraphqlClient } from "./sleeper/graphql.js";
 import { PlayerStore } from "./sleeper/players.js";
 import type { League, LeagueUser, NflState, Roster, Sport } from "./sleeper/types.js";
 import { buildTeamIndex, type TeamRef } from "./format.js";
+import { InjuryContextService } from "./injuries/context.js";
+import { EspnInjuryFeed, type InjuryFeed } from "./injuries/espn.js";
 
 export interface ServerContext {
   client: SleeperClient;
@@ -14,6 +16,7 @@ export interface ServerContext {
   auth: SleeperGraphqlClient | null;
   /** Whether tools that change the account (lineup, waivers, trades, ...) are registered. */
   allowWrites: boolean;
+  injuries: InjuryContextService;
 }
 
 export interface ContextOptions {
@@ -35,6 +38,10 @@ export interface ContextOptions {
   sleeperPassword?: string | null;
   /** Register write tools when a session exists (default true; CLI --read-only disables). */
   allowWrites?: boolean;
+  /** ESPN is an optional read-only source; the default makes no ESPN requests. */
+  injurySource?: "sleeper" | "espn";
+  injuryCacheTtlMs?: number;
+  injuryFeed?: InjuryFeed;
 }
 
 export function createContext(options: ContextOptions = {}): ServerContext {
@@ -47,7 +54,9 @@ export function createContext(options: ContextOptions = {}): ServerContext {
     auth = new SleeperGraphqlClient({ token: options.sleeperToken, email: options.sleeperEmail, password: options.sleeperPassword, log });
   }
   const allowWrites = Boolean(auth) && (options.allowWrites ?? true);
-  return { client, players, log, defaultUser, auth, allowWrites };
+  const feed = options.injuryFeed ?? (options.injurySource === "espn" ? new EspnInjuryFeed({ ttlMs: options.injuryCacheTtlMs }) : null);
+  const injuries = new InjuryContextService(players, feed);
+  return { client, players, log, defaultUser, auth, allowWrites, injuries };
 }
 
 /** Thrown for user-facing problems (bad input, unknown league, ...). The message is shown to the model verbatim. */
