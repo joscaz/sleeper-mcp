@@ -43,7 +43,7 @@ There are several community Sleeper MCP servers. This one focuses on the things 
 | Tests | 100+ unit + integration tests (in-memory and HTTP transports) plus a live smoke test | varies |
 | Tool annotations, `structuredContent`, prompts, resources | ✅ | partial |
 
-The 28 read tools need no login. They use Sleeper by default; [optional injury context](#injury-context-optional-espn) can add ESPN reports. The 11 [account tools](#account-tools-optional-session) (2 private reads, 9 writes) are registered only when you configure a Sleeper session, and `--read-only` keeps the writes off even then.
+The 30 read tools need no login. They use Sleeper by default; [optional injury context](#injury-context-optional-espn) can add ESPN reports. The 11 [account tools](#account-tools-optional-session) (2 private reads, 9 writes) are registered only when you configure a Sleeper session, and `--read-only` keeps the writes off even then.
 
 ## Quick start
 
@@ -126,7 +126,7 @@ The port is exposed only to the host by default. Use your hosting platform's pri
 
 ## Tools
 
-Every tool that takes a team accepts any of `username` (or display name), `user_id`, `roster_id`, `team_name` (partial, case-insensitive), `team` (any of those names in one field, when you are not sure which kind you have), or nothing at all when `SLEEPER_USERNAME` is set. `week` defaults to the current NFL week and `season` to the current league season.
+League tools that select a fantasy team accept any of `username` (or display name), `user_id`, `roster_id`, `team_name` (partial, case-insensitive), `team` (any of those names in one field, when you are not sure which kind you have), or nothing at all when `SLEEPER_USERNAME` is set. `week` defaults to the current NFL week and `season` to the current league season. The usage tools instead use completed regular-season windows; `get_team_usage` selects an NFL team code.
 
 ### Users & leagues
 
@@ -179,6 +179,8 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 | --- | --- |
 | `get_projections` | Weekly or season (`week=0`) projections. Filter by players/position/league/team. `scoring="league"` applies the league's exact `scoring_settings`. |
 | `get_player_stats` | Actual weekly/season fantasy production with the same filters and scoring options. |
+| `get_player_trends` | Completed-week snaps, targets, carries, red-zone usage, air yards and team shares for up to 20 player IDs. Numerical changes and per-metric sample sizes, not breakout scores. |
+| `get_team_usage` | Offensive usage distribution for an NFL team (e.g. BAL, KC, WAS), with historical team assignments, denominator coverage and player trends. |
 | `get_lineup_projections` | Start/sit for one team: current vs optimal lineup (respecting FLEX/SUPER_FLEX/IDP eligibility), suggested swaps, bye/injury/empty-slot warnings. Once games kick off, players whose game has started stay locked and count the points they have scored (plus a projection for the rest of a live game), so totals are projected finals and swaps only involve players still to play. |
 | `check_lineups` | Checks every in-season league for zero-point slots and missing projections. A separate `needs_check` watchlist flags questionable starters, stale injury snapshots, and conflicting reports without injury-driven `set_lineup` moves. Clear zero-point fixes can still return ready-made arguments. Locked starters, best ball leagues, and empty rosters are skipped. |
 
@@ -222,6 +224,28 @@ For example, **if Warren is currently starting and Likely is on your bench**, ca
 - If there is no single head-to-head opponent or the opponent's lineup is unavailable, point comparisons still work but win probabilities are `null` with a reason. Commissioner `custom_points` overrides keep the modeled team total fixed.
 - Injury evidence and warnings accompany the results, but Questionable/ESPN reports do not rewrite the model. Probabilities assume independent position-based variation and are approximate—not Sleeper's official odds or a guarantee of improved results.
 - This tool **never changes your lineup**. Any later `set_lineup` action requires a separate decision and fresh validation.
+
+### Usage trends
+
+Use `search_players` to resolve names, then call `get_player_trends` with `player_ids`. Both usage tools accept `weeks` (1–8, default 4), `season` (default current NFL season) and `end_week` (default latest fully completed week before the current week). They cover **regular-season QB/RB/WR/TE usage**, including fullbacks eligible at RB—not K, team defenses or IDP-only players. `get_team_usage` takes an NFL `team` code, not your fantasy team.
+
+For example, compare two players' roles with:
+
+```json
+{"player_ids":["8131","12518"],"weeks":4}
+```
+
+Then call `get_team_usage` with `{"team":"BAL","weeks":4}` to see how Baltimore distributed opportunities. No session, ESPN configuration, projections or account writes are involved.
+
+- **Sample sizes, not forecasts.** Trends compare the last two played weeks with earlier played weeks in the selected calendar window; with two played weeks, last versus first. The response names both groups and reports each metric's sample count. Counts change in units per played week; shares change in percentage points. These are equal-weight weekly means, not pooled season shares. Fewer than two played weeks is `insufficient_sample`.
+- **Historical teams.** Each player's weekly team comes from that week's stat row. Player trends can span a trade (teams are listed); a team report excludes weeks played elsewhere. Today's team is separately labeled `current_team`, never applied to historical stats.
+- **Missing is not zero.** A missing player row is unknown, not automatically an injury, missed game or bye. A row with no reported offensive snaps is distinct from missing data and does not establish why the player missed offensive work. A player bye is only *inferred* when matching surrounding team rows and the schedule support it; boundary weeks and uncertain team history stay unknown. Team byes come directly from the schedule.
+- **Know the denominator.** Snap share uses the player's reported team offensive snaps. Other shares use the sum of returned QB/RB/WR/TE rows for that week's team—not an independently verified total of every NFL player's work. Team reports include row counts and totals. Sleeper omits zero count fields, so omitted counts on positive-snap rows are treated as zero; explicit null/malformed counts invalidate the week. Zero or unknown denominators yield `null`. Air yards can be negative and their shares need not stay within 0–100.
+- **Bounded, read-only data.** One cached stats request per week serves all requested players. Unfinished weeks are excluded from calculations; failed, empty or malformed weeks remain visible without discarding successful weeks or backfilling older games. Stats cache for five minutes. `collected_at` is response assembly time; each week's upstream update range is reported separately. Sleeper can revise stats later.
+
+These tools describe observed roles. They do not label breakouts, infer medical availability, rank waivers or change lineups.
+
+When one teammate has recorded volume but missing snap counts, the team-volume denominator is treated as incomplete. Other players' known counts and snap shares remain visible; their volume shares stay `null` rather than discarding otherwise valid player stats.
 
 ### Account tools (optional, session)
 

@@ -13,6 +13,7 @@ import { registerOddsTools } from "./tools/odds.js";
 import { registerAccountTools } from "./tools/account.js";
 import { registerInjuryTools } from "./tools/injuries.js";
 import { registerLineupComparisonTool } from "./tools/compare-lineups.js";
+import { registerUsageTools } from "./tools/usage.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { name: string; version: string };
@@ -30,11 +31,12 @@ Typical flow:
 5. get_matchup_odds ("am I going to win this week?", live during games), get_playoff_odds ("will I make the playoffs?", "what do I need?") and get_move_impact ("does this trade or pickup help my playoff odds?").
 6. get_injury_report for source timestamps, stale snapshots and disagreements. Questionable means check availability, not automatically bench.
 7. compare_lineups to compare proposed start/sit scenarios against the current weekly lineup without changing anything.
+8. get_player_trends / get_team_usage for completed-week offensive usage, team shares and sample sizes. These are descriptive, not forecasts or injury diagnoses.
 
 Notes:
 - Player ids are resolved to {id, name, pos, team, inj} everywhere; team defenses use team codes (e.g. "DET").
 - "week" defaults to the current NFL week from get_nfl_state; "season" defaults to the current league season.
-- Any team can be selected by username, user_id, roster_id or team_name.
+- Fantasy teams can be selected by username, user_id, roster_id or team_name. get_team_usage instead takes an NFL team code and uses completed-week windows.
 - Data is cached briefly (20s–5min); the player database refreshes daily. Injury context distinguishes report timestamps from snapshot retrieval times. The optional ESPN source is off unless configured; projections and odds remain Sleeper-based.`;
 
 export interface CreateServerOptions extends ContextOptions {
@@ -64,6 +66,7 @@ export function createServer(options: CreateServerOptions = {}): { server: McpSe
   registerLineupCheckTools(server, ctx);
   registerOddsTools(server, ctx);
   registerLineupComparisonTool(server, ctx);
+  registerUsageTools(server, ctx);
   registerAccountTools(server, ctx);
   registerPrompts(server);
   registerResources(server, ctx);
