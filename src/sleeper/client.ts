@@ -317,6 +317,15 @@ export class SleeperClient {
     return (await this.get<StatMap>(path, { ttlMs: options.ttlMs ?? TTL.stats, nullable: true })) ?? {};
   }
 
+  /** Historical team/game metadata is only available on the row-based stats endpoint. */
+  getUsageStats(season: string, week: number): Promise<unknown> {
+    const query = new URLSearchParams({ season_type: "regular" });
+    for (const position of ["QB", "RB", "WR", "TE"]) query.append("position[]", position);
+    return this.get<unknown>(`https://api.sleeper.com/stats/nfl/${enc(season)}/${week}?${query}`, {
+      ttlMs: TTL.stats, nullable: true,
+    });
+  }
+
   /** Every NFL game of a season with its week, teams and live status (pre_game / in_game / complete). */
   async getSchedule(sport: Sport, seasonType: string, season: string, fresh = false): Promise<ScheduleGame[]> {
     const url = `${this.origin}/schedule/${sport}/${seasonType}/${enc(season)}`;

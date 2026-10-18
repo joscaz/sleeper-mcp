@@ -51,6 +51,8 @@ describe("server surface", () => {
         "get_nfl_state",
         "get_player",
         "get_player_stats",
+        "get_player_trends",
+        "get_team_usage",
         "get_playoff_bracket",
         "get_playoff_odds",
         "get_projections",
