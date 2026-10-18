@@ -245,6 +245,8 @@ Then call `get_team_usage` with `{"team":"BAL","weeks":4}` to see how Baltimore 
 
 These tools describe observed roles. They do not label breakouts, infer medical availability, rank waivers or change lineups.
 
+When one teammate has recorded volume but missing snap counts, the team-volume denominator is treated as incomplete. Other players' known counts and snap shares remain visible; their volume shares stay `null` rather than discarding otherwise valid player stats.
+
 ### Account tools (optional, session)
 
 Registered only when a Sleeper session is configured (`SLEEPER_TOKEN`, or `SLEEPER_EMAIL` + `SLEEPER_PASSWORD`). They talk to Sleeper's **private GraphQL API** (`https://sleeper.com/graphql`), the same one the web app uses. Every tool that changes the account takes `dry_run=true` to validate and preview first, resolves player names for you, and re-reads the roster afterwards so you see the result. "My team" is the roster owned by the logged-in user; pass `roster_id` to act on another one (co-owners/commissioners).

@@ -119,6 +119,20 @@ describe("descriptive usage calculations", () => {
     const w = dataWeek(1, [row(1, "5850", "KC", { rec_tgt: 4 }), rows(1)[1]]);
     expect(teamTotals(w, "KC").usable).toBe(false);
     expect(playerUsageWeeks([w], "5850")[0]!.metrics.target_share).toBeNull();
+    expect(playerUsageWeeks([w], "5850")[0]!.metrics.rec_tgt).toBe(4);
+  });
+  it("keeps known player counts and snap share when a teammate makes team-volume shares uncertain", () => {
+    const w = dataWeek(1, [
+      row(1, "5850", "KC", { off_snp: 30, tm_off_snp: 60, rec_tgt: 5 }),
+      row(1, "4046", "KC", { rec_tgt: 1, gp: 1 }),
+    ]);
+    const history = playerUsageWeeks([w], "5850");
+    expect(history[0]).toMatchObject({
+      status: "played", metrics: { off_snp: 30, rec_tgt: 5, snap_share: 50, target_share: null },
+      denominators: { usable: false, targets: null },
+    });
+    expect(usageTrend(history).metrics.rec_tgt).toMatchObject({ recent: { mean: 5, samples: 1 } });
+    expect(usageTrend(history).metrics.target_share).toMatchObject({ recent: { mean: null, samples: 0 } });
   });
   it("nulls missing/inconsistent snap denominators without inventing zero shares", () => {
     const a = dataWeek(1, [row(1, "5850", "KC", { off_snp: 30, rec_tgt: 2 })]);

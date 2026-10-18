@@ -157,20 +157,23 @@ export function playerUsageWeeks(weeks: UsageWeek[], playerId: string, onlyTeam?
     }
     const totals = teamTotals(week, row.team);
     base.denominators = { ...totals, team_offensive_snaps: row.stats.tm_off_snp ?? null };
-    if (!totals.usable) return { ...base, reason: "Team offensive usage is missing or incomplete." };
+    // Preserve independently known player counts even when a teammate's incomplete row
+    // prevents a trustworthy team-volume denominator.
+    for (const key of COUNT_KEYS) base.metrics[key] = count(row, key);
     if ((row.stats.off_snp ?? 0) <= 0) {
+      if (!totals.usable) return { ...base, reason: "Team offensive usage is missing or incomplete; any reported player counts are retained." };
       return { ...base, status: "no_offensive_snaps_reported",
         reason: "A player row exists but reports no offensive snaps. This is not proof of injury or inactivity." };
     }
-    const metrics = emptyMetrics();
-    for (const key of COUNT_KEYS) metrics[key] = count(row, key);
+    const metrics = base.metrics;
     const teamSnaps = row.stats.tm_off_snp ?? null;
     metrics.snap_share = teamSnaps !== null && row.stats.off_snp! <= teamSnaps ? percent(metrics.off_snp, teamSnaps) : null;
     metrics.target_share = percent(metrics.rec_tgt, totals.targets);
     metrics.carry_share = percent(metrics.rush_att, totals.carries);
     metrics.red_zone_share = percent(metrics.rec_rz_tgt! + metrics.rush_rz_att!, totals.red_zone_opportunities);
     metrics.air_yard_share = percent(metrics.rec_air_yd, totals.air_yards);
-    return { ...base, status: "played", metrics };
+    return { ...base, status: "played", metrics,
+      reason: totals.usable ? null : "Team volume is incomplete; player counts and known snap share are retained, other shares are null." };
   });
 }
 

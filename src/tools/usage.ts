@@ -59,6 +59,7 @@ function metadata(season: string, weeks: UsageWeek[]) {
     methodology: [
       "QB/RB/WR/TE fantasy-position rows only (includes fullbacks eligible at RB). Counts are sparse: omitted counts on positive-offensive-snap rows are treated as zero; explicit null/malformed counts invalidate the week.",
       "Snap share uses that player's reported tm_off_snp. Other shares use summed returned rows for that week's team, not independently verified full-team totals. Zero/unknown denominators produce null.",
+      "A teammate's volume without snap counts makes team-volume shares uncertain, but known player counts and snap share remain visible. Each metric reports its own sample count.",
       "Air yards can be negative; air-yard shares are not capped at 0–100.",
       "Trends compare the last two played weeks with earlier played weeks in the window; with two, compare last versus first. Equal-weight weekly means, per-metric sample counts; fewer than two played weeks cannot establish a trend.",
       "Byes, no-offensive-snap rows, missing data and unfinished games are excluded from trend means, not scored as zero. Inferred byes require matching surrounding historical team rows; other missing rows stay unknown.",
