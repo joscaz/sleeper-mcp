@@ -10,6 +10,7 @@ import type { Matchup } from "../sleeper/types.js";
 import { planLineup } from "./account.js";
 import { sideOutlook, starterViews } from "./odds.js";
 import { guard, leagueIdSchema, teamSelectorShape } from "./shared.js";
+import { AVAILABILITY_POLICY } from "../availability.js";
 
 const player = z.string().trim().min(1).max(150);
 const scenarioSchema = z.object({
@@ -90,7 +91,7 @@ export function registerLineupComparisonTool(server: McpServer, ctx: ServerConte
         const capturedAt = new Date().toISOString();
         // No network calls below: all scenarios use the same collected input objects.
         const score = (m: Matchup) => {
-          const views = starterViews(ctx, bundle, m, projections, games);
+          const views = starterViews(ctx, bundle, m, projections, games, true);
           return { views, outlook: sideOutlook(m, views) };
         };
         const other = opponent ? score(opponent) : null;
@@ -154,6 +155,7 @@ export function registerLineupComparisonTool(server: McpServer, ctx: ServerConte
           odds_unavailable_reason: oddsUnavailable,
           scenarios: results,
           injury_data: injuryMetadata(injuries),
+          availability_policy: AVAILABILITY_POLICY,
           injury_context: ids.filter((id) => {
             const context = injuries.byPlayer.get(id);
             return context?.needs_check || context?.designation;

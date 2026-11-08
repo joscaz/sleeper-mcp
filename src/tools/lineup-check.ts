@@ -16,9 +16,8 @@ import { weeklyRoster } from "../lineups.js";
 import { injuryMetadata, type PlayerInjuryContext } from "../injuries/context.js";
 import { lineupAnalysis, loadLiveWeek, seasonTypeFor } from "./stats.js";
 import { guard, userIdSchema, usernameSchema, weekSchema } from "./shared.js";
+import { RULED_OUT as OUT_RE } from "../availability.js";
 
-/** Injury designations that mean the player will not play: Out, IR, Sus, PUP, NFI(-R/-A), NA, DNR, COV. */
-const OUT_RE = /^(out|ir|sus|pup|nfi|na|dnr|cov)\b/i;
 const DOUBTFUL_RE = /^doubtful\b/i;
 
 type Impact = "scores_zero" | "at_risk";

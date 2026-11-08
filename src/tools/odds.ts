@@ -24,9 +24,8 @@ import { findOnRoster, resolveAnyPlayer } from "./account.js";
 import { standings } from "./leagues.js";
 import { optimalStarters } from "./stats.js";
 import { guard, leagueIdSchema, teamSelectorShape, weekSchema } from "./shared.js";
-
-/** Injury designations that mean a player will not play: their projection counts as 0 before kickoff. */
-const RULED_OUT = /^(out|ir|pup|sus|nfi)\b/i;
+import { AVAILABILITY_POLICY, availableProjection, currentInjuryWeek } from "../availability.js";
+import { injuryMetadata } from "../injuries/context.js";
 
 const MATCHUP_METHOD =
   "Points so far plus each starter's league-scored projection for the share of their game still to play (game status from Sleeper's NFL schedule, live progress from team offensive snaps). Remaining points vary by position; win % is the normal approximation of the score difference.";
@@ -37,7 +36,7 @@ export function registerOddsTools(server: McpServer, ctx: ServerContext): void {
     {
       title: "Matchup win probability (live)",
       description:
-        "Win probability for a week's matchups (default: current week), updated live during games: points so far plus league-scored projections for the share of each starter's game still to play, using Sleeper's NFL schedule to tell final, live and upcoming games apart. Returns each side's points, projected final and win %, and for a selected team a starter-by-starter view (final / playing / yet to play / bye). Past weeks return results; future weeks are projections only.",
+        "Win probability for a week's matchups (default: current week), updated live during games: points so far plus league-scored projections for the share of each starter's game still to play, using Sleeper's NFL schedule. Shares the current-week ruled-out scoring policy with lineup projections and comparisons; Questionable, Doubtful and optional ESPN reports do not adjust points. Includes current-week injury source conflicts in needs_check. Returns points, projected final, win %, and optionally starter-by-starter game states. Past weeks return results; future weeks are projections only.",
       inputSchema: {
         league_id: leagueIdSchema,
         week: weekSchema,
@@ -69,6 +68,7 @@ export function registerOddsTools(server: McpServer, ctx: ServerContext): void {
           onlyRosterId: only,
           includePlayers: include_players ?? only !== undefined,
           weekOver: over,
+          currentInjuries: currentInjuryWeek(season, resolvedWeek, state),
         });
       }),
   );
@@ -131,7 +131,7 @@ export interface StarterView extends StarterOutlook {
   state: GameState | "empty";
 }
 
-export function starterViews(ctx: ServerContext, bundle: LeagueBundle, matchup: Matchup, projections: StatMap, games: WeekGames): StarterView[] {
+export function starterViews(ctx: ServerContext, bundle: LeagueBundle, matchup: Matchup, projections: StatMap, games: WeekGames, currentInjuries: boolean): StarterView[] {
   const slots = startingSlots(bundle.league);
   const scoring = bundle.league.scoring_settings;
   const scored = matchup.players_points ?? {};
@@ -140,13 +140,12 @@ export function starterViews(ctx: ServerContext, bundle: LeagueBundle, matchup: 
     if (!id || id === "0") return { id: "0", slot, state: "empty", points: 0, projection: 0, remaining: 0, pos: null };
     const player = ctx.players.raw(id);
     const game = games.game(player?.team ?? (isTeamDefense(id) ? id : null));
-    const ruledOut = game.state === "yet_to_play" && RULED_OUT.test(player?.injury_status ?? "");
     return {
       id,
       slot,
       state: game.state,
       points: num(scored[id]),
-      projection: ruledOut ? 0 : scoreStatLine(projections[id] ?? null, scoring),
+      projection: availableProjection(scoreStatLine(projections[id] ?? null, scoring), player?.injury_status, game, currentInjuries),
       remaining: game.remaining,
       pos: ctx.players.ref(id).pos,
     };
@@ -179,14 +178,14 @@ function matchupStatus(starters: readonly StarterView[]): MatchupStatus {
   return final ? "final" : "no_lineups";
 }
 
-function describeMatchupOdds(
+async function describeMatchupOdds(
   ctx: ServerContext,
   bundle: LeagueBundle,
   matchups: Matchup[],
   projections: StatMap,
   games: WeekGames,
   week: number,
-  options: { onlyRosterId?: number; includePlayers: boolean; weekOver: boolean },
+  options: { onlyRosterId?: number; includePlayers: boolean; weekOver: boolean; currentInjuries: boolean },
 ) {
   const groups = new Map<number, Matchup[]>();
   const byes: Matchup[] = [];
@@ -196,7 +195,7 @@ function describeMatchupOdds(
   }
 
   const analyze = (m: Matchup) => {
-    const starters = starterViews(ctx, bundle, m, projections, games);
+    const starters = starterViews(ctx, bundle, m, projections, games, options.currentInjuries);
     return { m, starters, outlook: sideOutlook(m, starters) };
   };
   type Side = ReturnType<typeof analyze>;
@@ -252,6 +251,16 @@ function describeMatchupOdds(
     result.note = `Roster ${options.onlyRosterId} has no matchup in week ${week}.`;
   }
   result.game_status_source = games.source;
+  result.availability_policy = AVAILABILITY_POLICY;
+  if (options.currentInjuries) {
+    const relevant = [...pairs.flatMap(([, ms]) => ms), ...relevantByes];
+    const ids = [...new Set(relevant.flatMap((m) => m.starters ?? []))].filter((id) => id !== "0");
+    const injuries = await ctx.injuries.report(ids);
+    result.injury_data = injuryMetadata(injuries);
+    result.needs_check = ids.filter((id) => injuries.byPlayer.get(id)?.needs_check).map((id) => ({
+      player: ctx.players.ref(id), injury_context: injuries.byPlayer.get(id)!,
+    }));
+  }
   result.method = MATCHUP_METHOD;
   return result;
 }
@@ -357,7 +366,7 @@ function buildSimWeeks(ctx: ServerContext, plan: SeasonPlan, players?: ReadonlyM
     let scores: Map<number, ScoreDistribution>;
     const games = w.games;
     if (games) {
-      scores = new Map(w.matchups.map((m) => [m.roster_id, sideOutlook(m, starterViews(ctx, bundle, m, w.projections, games))]));
+      scores = new Map(w.matchups.map((m) => [m.roster_id, sideOutlook(m, starterViews(ctx, bundle, m, w.projections, games, w.week === plan.currentWeek))]));
     } else {
       let p = projected[i];
       if (!p) {
