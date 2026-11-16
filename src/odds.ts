@@ -83,7 +83,7 @@ export function teamOutlook(starters: readonly StarterOutlook[]): TeamOutlook {
   let variance = 0;
   for (const s of starters) {
     points += s.points;
-    if (s.remaining <= 0 || s.projection <= 0) continue;
+    if (s.remaining <= 0) continue;
     toCome += s.projection * s.remaining;
     const sd = spreadFor(s.pos) * s.projection;
     variance += sd * sd * s.remaining;
@@ -306,7 +306,7 @@ export function simulateSeason(teams: readonly SimTeam[], weeks: readonly SimWee
       const playing: number[] = [];
       for (let i = 0; i < n; i++) {
         if (!w.plays[i]) continue;
-        const x = Math.max(0, w.mean[i]! + (w.projected ? shock[i]! : 0) + w.sd[i]! * normal());
+        const x = w.mean[i]! + (w.projected ? shock[i]! : 0) + w.sd[i]! * normal();
         score[i] = x;
         pf[i] = pf[i]! + x;
         playing.push(i);

@@ -191,6 +191,8 @@ Every tool that takes a team accepts any of `username` (or display name), `user_
 | `get_playoff_odds` | Simulates the rest of the regular season (10,000 runs by default) over the real schedule: playoff %, first-round-bye %, #1-seed %, projected record and average seed for every team. For a selected team, also this week's swing (playoff % if they win vs lose) and playoff % by final win total. |
 | `get_move_impact` | What-if for a trade, waiver claim or add/drop: playoff %, bye %, #1-seed %, projected record and average weekly projection before and after the move for your team and the trade partner, plus who enters and leaves the best lineup and a warning when a roster would be over its limit. |
 
+Odds and simulations preserve negative fantasy points under the league's scoring, including negative remaining projections and completed team scores. They do not floor individual contributions or team totals at zero.
+
 ### Comparing lineups (read-only)
 
 `compare_lineups` uses your current scoring-week lineup as the baseline. Each named scenario starts from that same baseline, not from the preceding scenario. Use either `moves` (start/bench swaps) or a complete `starters` list in league slot order.

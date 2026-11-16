@@ -45,6 +45,17 @@ describe("win probability", () => {
     expect(t.variance).toBeCloseTo(0.6 ** 2 * 256 * 0.5 + 0.65 ** 2 * 100, 9);
   });
 
+  it("includes negative remaining points and their uncertainty instead of treating them as zero", () => {
+    const outlook = teamOutlook([
+      { points: 10, projection: -4, remaining: 0.5, pos: "DEF" },
+      { points: -3, projection: -5, remaining: 0, pos: "WR" },
+    ]);
+    expect(outlook.points).toBe(7);
+    expect(outlook.still_to_come).toBe(-2);
+    expect(outlook.mean).toBe(5);
+    expect(outlook.variance).toBeCloseTo((0.8 * 4) ** 2 * 0.5, 9);
+  });
+
   it("firstRoundByes follows bracket sizes", () => {
     expect([2, 3, 4, 5, 6, 7, 8, 10, 12].map(firstRoundByes)).toEqual([0, 1, 0, 3, 2, 1, 0, 6, 4]);
   });
@@ -88,6 +99,15 @@ describe("simulateSeason", () => {
     pairs,
     scores: new Map(means.map((m, i) => [i + 1, { mean: m, variance: sd * sd }])),
     projected: true,
+  });
+
+  it("preserves the winner of a completed negative-score matchup", () => {
+    const result = simulateSeason([team(1), team(2)], [{
+      week: 5, pairs: [[1, 2]], projected: false,
+      scores: new Map([[1, { mean: -1, variance: 0 }], [2, { mean: -2, variance: 0 }]]),
+    }], { simulations: 10, seed: 7, playoffTeams: 1, byes: 0, teamError: 0 });
+    expect(result.teams[0]).toMatchObject({ avg_wins: 1, avg_losses: 0, avg_ties: 0, playoffs: 1 });
+    expect(result.teams[1]).toMatchObject({ avg_wins: 0, avg_losses: 1, avg_ties: 0, playoffs: 0 });
   });
 
   it("hands out exactly the available playoff spots, byes and #1 seed", () => {
