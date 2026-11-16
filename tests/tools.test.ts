@@ -643,6 +643,38 @@ describe("odds", () => {
   type Side = { roster_id: number; team_name: string; points: number; projected: number; win_pct: number; starters_left: number; starters?: Starter[] };
   type OddsMatchup = { matchup_id: number; status: string; teams: Side[]; favorite?: string | null; winner?: string };
 
+  it("counts negative starter projections in matchup totals and lineup-scenario deltas", async () => {
+    const o = await connectedClient({
+      [SCHEDULE_URL]: preKickoffSchedule2026,
+      [`/league/${LEAGUE_ID}`]: { ...league, scoring_settings: { pts_allow: -1 } },
+      [`/league/${LEAGUE_ID}/matchups/5`]: matchupsWeek5.map((m) => ({ ...m, points: 0, players_points: {} })),
+      "/projections/nfl/regular/2026/5": { DET: { pts_allow: 4 }, SF: { pts_allow: 2 } },
+    });
+    try {
+      const args = { league_id: LEAGUE_ID, roster_id: 1 };
+      const lineup = await o.call("get_lineup_projections", args);
+      const odds = await o.call("get_matchup_odds", args);
+      const compared = await o.call("compare_lineups", {
+        ...args, scenarios: [{
+          name: "Empty defense slot",
+          starters: rosters[0]!.starters!.map((id) => id === "DET" ? "0" : id),
+        }],
+      });
+      for (const r of [lineup, odds, compared]) expect(r.result.isError, r.text).toBeFalsy();
+      expect(lineup.data!.current_projected_total).toBe(-4);
+      const side = (odds.data!.matchups as OddsMatchup[])[0]!.teams[0]!;
+      expect(side.starters!.find((p) => p.id === "DET")?.proj_left).toBe(-4);
+      expect(side.projected).toBe(-4);
+      expect(side.win_pct).toBeLessThan(50);
+      expect(compared.data!.baseline).toMatchObject({ projected_total: -4, win_pct: side.win_pct });
+      expect((compared.data!.scenarios as Record<string, unknown>[])[0]).toMatchObject({
+        valid: true, projected_total: 0, projected_points_delta: 4,
+      });
+    } finally {
+      await o.close();
+    }
+  });
+
   it("get_matchup_odds combines live points with projections for the time each starter has left", async () => {
     const o = await connectedClient(live);
     try {
@@ -813,6 +845,28 @@ describe("odds", () => {
     lineup_change?: LineupChange;
   };
   const names = (players: { name: string }[]) => players.map((p) => p.name);
+
+  it("keeps negative contributions in future-week move-impact averages and lineup totals", async () => {
+    const future = restOfSeason();
+    for (let week = 6; week <= 14; week++) {
+      future[`/projections/nfl/regular/2026/${week}`] = { DET: { pts_allow: 4 }, "11000": { rec: 5 } };
+    }
+    const o = await connectedClient({
+      ...live, ...future,
+      [`/league/${LEAGUE_ID}`]: { ...league, scoring_settings: { pts_allow: -1, rec: 1 } },
+    });
+    try {
+      const response = await o.call("get_move_impact", { league_id: LEAGUE_ID, roster_id: 1, add: ["Rookie Runner"], simulations: 1000 });
+      expect(response.result.isError, response.text).toBeFalsy();
+      const impact = (response.data!.impact as Record<string, unknown>[])[0]!;
+      expect(impact).toMatchObject({
+        weekly_projection_before: -4, weekly_projection_after: 1,
+        lineup_change: { projected_before: -4, projected_after: 1 },
+      });
+    } finally {
+      await o.close();
+    }
+  });
 
   it("get_move_impact shows how a trade moves both teams' playoff odds", async () => {
     // One playoff spot, so the trade decides whether Alice or Bob gets it.

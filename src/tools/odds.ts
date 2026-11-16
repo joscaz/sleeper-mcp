@@ -772,7 +772,7 @@ function bestLineup(ctx: ServerContext, bundle: LeagueBundle, roster: Roster, pr
 }
 
 function lineupTotal(lineup: Lineup): number {
-  return lineup.starters.reduce((sum, id) => sum + (id ? Math.max(0, lineup.projected.get(id) ?? 0) : 0), 0);
+  return lineup.starters.reduce((sum, id) => sum + (id ? lineup.projected.get(id) ?? 0 : 0), 0);
 }
 
 /** Projected score distribution for a roster's best lineup. */
@@ -782,7 +782,7 @@ function projectedWeek(ctx: ServerContext, bundle: LeagueBundle, roster: Roster,
   let variance = 0;
   for (const id of lineup.starters) {
     const mu = id ? (lineup.projected.get(id) ?? 0) : 0;
-    if (!id || mu <= 0) continue;
+    if (!id) continue;
     const sd = spreadFor(ctx.players.ref(id).pos) * mu;
     mean += mu;
     variance += sd * sd;
